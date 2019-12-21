@@ -1,5 +1,5 @@
 CROSS_COMPILE=arm-none-eabi-
-CFLAGS=-Os -I../Lib/include -std=gnu99 -fomit-frame-pointer -nostartfiles -ffreestanding -Wextra -Werror
+CFLAGS=-Os -I../include -I../Lib/include -std=gnu99 -fomit-frame-pointer -nostartfiles -ffreestanding -Wextra -Werror
 VPATH=../Lib/src
 
 OBJS = main.o string.o svc.o

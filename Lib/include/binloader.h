@@ -15,10 +15,10 @@
  */
 typedef struct BINLDRHLP
 {
-    /** The CCX ID of the invoked PSP. */
-    uint32_t            idCcx;
-    /** Number of CCXs in the system. */
-    uint32_t            cCcxs;
+    /** The CCD ID of the invoked PSP. */
+    uint32_t            idCcd;
+    /** Number of CCDs in the system. */
+    uint32_t            cCcds;
     /** The passed pCmdBuf argument in main. */
     void                *pvCmdBuf;
     /** Logging function. */

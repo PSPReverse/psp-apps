@@ -8,24 +8,10 @@
 #include <binloader.h>
 
 #define IN_PSP
-#include <psp-binloader.h>
+#include <psp-stub/psp-stub.h>
+#include <sev/sev.h>
 
-/**
- * SEV Command buffer structure.
- */
-typedef struct SEVCMDBUF
-{
-    /** The command identifier. */
-    uint32_t                    idCmd;
-    /** Low part of the X86 physical address of the command buffer. */
-    uint32_t                    PhysX86CmdBufLow;
-    /** High part of the X86 physical address of the command buffer. */
-    uint32_t                    PhysX86CmdBufHigh;
-} SEVCMDBUF;
-/** Pointer to a SEV command buffer structure. */
-typedef SEVCMDBUF *PSEVCMDBUF;
-
-typedef struct BINLOADERSTATE
+typedef struct PSPSTUBSTATE
 {
     /** The CPU ID of the PSP. */
     uint32_t                    uCpuId;
@@ -43,44 +29,44 @@ typedef struct BINLOADERSTATE
     LOGGER                      Logger;
     /** Helper structure. */
     BINLDRHLP                   Hlp;
-} BINLOADERSTATE;
+} PSPSTUBSTATE;
 /** Pointer to the binary loader state. */
-typedef BINLOADERSTATE *PBINLOADERSTATE;
+typedef PSPSTUBSTATE *PPSPSTUBSTATE;
 
-typedef int32_t FNPSPREQHANDLER(PBINLOADERSTATE pBinLdrState, PBINLOADERREQHDR pReqHdr);
+typedef int32_t FNPSPREQHANDLER(PPSPSTUBSTATE pBinLdrState, PPSPSTUBREQHDR pReqHdr);
 typedef FNPSPREQHANDLER *PFNPSPREQHANDLER;
 
-typedef struct BINLOADERREQHANDLER
+typedef struct PSPSTUBREQHANDLER
 {
     /** Size of the request structure in bytes. */
     uint32_t                    cbReq;
     /** The handler to call. */
     PFNPSPREQHANDLER            pfnReq;
-} BINLOADERREQHANDLER;
-typedef const BINLOADERREQHANDLER *PCBINLOADERREQHANDLER;
+} PSPSTUBREQHANDLER;
+typedef const PSPSTUBREQHANDLER *PCPSPSTUBREQHANDLER;
 
 /** The global binary loader state. */
-static BINLOADERSTATE g_BinLdrState;
+static PSPSTUBSTATE g_StubState;
 /** Our scratch buffer for temporary memory. */
 static uint8_t g_abScratch[16 * 1024];
 
-static void bin_ldr_logger_flush(void *pvUser, uint8_t *pbBuf, size_t cbBuf)
+static void pspstubLoggerFlush(void *pvUser, uint8_t *pbBuf, size_t cbBuf)
 {
     (void)pvUser;
     svc_log_char_buf(pbBuf, cbBuf);
 }
 
-static void bin_loader_log(const char *pszFmt, ...)
+static void psp_stub_log(const char *pszFmt, ...)
 {
     va_list hArgs;
     va_start(hArgs, pszFmt);
 
-    LOGLoggerV(&g_BinLdrState.Logger, pszFmt, hArgs);
+    LOGLoggerV(&g_StubState.Logger, pszFmt, hArgs);
 
     va_end(hArgs);
 }
 
-static int bin_ldr_ctx_load_or_init(PBINLOADERSTATE pCtx, uint32_t idCcx, uint32_t cCcxs, uint8_t fFirstRun)
+static int bin_ldr_ctx_load_or_init(PPSPSTUBSTATE pCtx, uint32_t idCcd, uint32_t cCcds, uint8_t fFirstRun)
 {
     if (!fFirstRun)
     {
@@ -94,19 +80,14 @@ static int bin_ldr_ctx_load_or_init(PBINLOADERSTATE pCtx, uint32_t idCcx, uint32
     }
     else
     {
-
-        /*
-         * Initialize the CPU ID and place a detection marker so the log extractor
-         * can find the PSP.
-         */
-        pCtx->uCpuId = idCcx;
+        pCtx->uCpuId = idCcd;
         pCtx->fBinLoaded = 0;
         pCtx->fFirstRun  = 1;
-        pCtx->Hlp.idCcx  = idCcx;
-        pCtx->Hlp.cCcxs  = cCcxs;
-        pCtx->Hlp.pfnLog = bin_loader_log;
-        LOGLoggerInit(&pCtx->Logger, bin_ldr_logger_flush, pCtx,
-                      "BinLoader", NULL, 0);
+        pCtx->Hlp.idCcd  = idCcd;
+        pCtx->Hlp.cCcds  = cCcds;
+        pCtx->Hlp.pfnLog = psp_stub_log;
+        LOGLoggerInit(&pCtx->Logger, pspstubLoggerFlush, pCtx,
+                      "PspStub", NULL, 0);
         LOGLoggerSetDefaultInstance(&pCtx->Logger);
         LogRel("Stub called for the first time\n");
     }
@@ -114,7 +95,7 @@ static int bin_ldr_ctx_load_or_init(PBINLOADERSTATE pCtx, uint32_t idCcx, uint32
     return PSPSTATUS_SUCCESS;
 }
 
-static void bin_ldr_ctx_save(PBINLOADERSTATE pCtx)
+static void bin_ldr_ctx_save(PPSPSTUBSTATE pCtx)
 {
     void *pvSave = svc_get_state_buffer(sizeof(*pCtx));
     if (pvSave != NULL)
@@ -164,9 +145,9 @@ static int bin_ldr_write_to_x86(X86PADDR PhysX86Addr, void *pvSrc, size_t cbCopy
 }
 
 
-static int32_t binldrReqLoadBin(PBINLOADERSTATE pBinLdrState, PBINLOADERREQHDR pReqHdr)
+static int32_t pspstubReqLoadBin(PPSPSTUBSTATE pBinLdrState, PPSPSTUBREQHDR pReqHdr)
 {
-    PBINLOADERREQLOADBIN pReq = (PBINLOADERREQLOADBIN)pReqHdr;
+    PPSPSTUBREQLOADBIN pReq = (PPSPSTUBREQLOADBIN)pReqHdr;
     int32_t rc = INF_SUCCESS;
 
     if (pReq->cbBinary <= sizeof(pBinLdrState->abBinary))
@@ -194,28 +175,28 @@ static int32_t binldrReqLoadBin(PBINLOADERSTATE pBinLdrState, PBINLOADERREQHDR p
 }
 
 
-static int32_t binldrReqExecBin(PBINLOADERSTATE pBinLdrState, PBINLOADERREQHDR pReqHdr)
+static int32_t pspstubReqExecBin(PPSPSTUBSTATE pBinLdrState, PPSPSTUBREQHDR pReqHdr)
 {
-    PBINLOADERREQEXECBIN pReq = (PBINLOADERREQEXECBIN)pReqHdr;
+    PPSPSTUBREQEXECBIN pReq = (PPSPSTUBREQEXECBIN)pReqHdr;
 
     int32_t rc = INF_SUCCESS;
 
     LogRel("Calling loaded binary\n");
 
-    memcpy((void *)(uintptr_t)BIN_LOADER_LOAD_ADDR, &g_BinLdrState.abBinary[0], sizeof(g_BinLdrState.abBinary));
-    ((PFNBINLOADENTRY)BIN_LOADER_LOAD_ADDR)(&g_BinLdrState.abBinState[0], &pBinLdrState->Hlp, pReq->PhysX8AddrExec, 0, pBinLdrState->fFirstRun);
+    memcpy((void *)(uintptr_t)BIN_LOADER_LOAD_ADDR, &g_StubState.abBinary[0], sizeof(g_StubState.abBinary));
+    ((PFNBINLOADENTRY)BIN_LOADER_LOAD_ADDR)(&g_StubState.abBinState[0], &pBinLdrState->Hlp, pReq->PhysX8AddrExec, 0, pBinLdrState->fFirstRun);
     pBinLdrState->fFirstRun = 0;
 
     return rc;
 }
 
 
-static int32_t binldrReqSmnRwWorker(PBINLOADERSTATE pBinLdrState, PBINLOADERREQHDR pReqHdr, uint8_t fWrite)
+static int32_t pspstubReqSmnRwWorker(PPSPSTUBSTATE pBinLdrState, PPSPSTUBREQHDR pReqHdr, uint8_t fWrite)
 {
-    PBINLOADERREQSMNRW pReq = (PBINLOADERREQSMNRW)pReqHdr;
+    PPSPSTUBREQSMNRW pReq = (PPSPSTUBREQSMNRW)pReqHdr;
     int32_t rc = INF_SUCCESS;
 
-    void *pvSmn = svc_smn_map_ex(pReq->u32Addr, pReq->idCcxTgt);
+    void *pvSmn = svc_smn_map_ex(pReq->u32Addr, pReq->idCcdTgt);
     if (pvSmn != NULL)
     {
         if (fWrite)
@@ -265,28 +246,28 @@ static int32_t binldrReqSmnRwWorker(PBINLOADERSTATE pBinLdrState, PBINLOADERREQH
     }
     else
     {
-        LogRel("Mapping SMN address %#x on CCX %u failed\n", pReq->u32Addr, pReq->idCcxTgt);
+        LogRel("Mapping SMN address %#x on CCD %u failed\n", pReq->u32Addr, pReq->idCcdTgt);
         rc = ERR_INVALID_STATE;
     }
 
     return rc;
 }
 
-static int32_t binldrReqSmnRead(PBINLOADERSTATE pBinLdrState, PBINLOADERREQHDR pReqHdr)
+static int32_t pspstubReqSmnRead(PPSPSTUBSTATE pBinLdrState, PPSPSTUBREQHDR pReqHdr)
 {
-    return binldrReqSmnRwWorker(pBinLdrState, pReqHdr, 0 /*fWrite*/);
+    return pspstubReqSmnRwWorker(pBinLdrState, pReqHdr, 0 /*fWrite*/);
 }
 
 
-static int32_t binldrReqSmnWrite(PBINLOADERSTATE pBinLdrState, PBINLOADERREQHDR pReqHdr)
+static int32_t pspstubReqSmnWrite(PPSPSTUBSTATE pBinLdrState, PPSPSTUBREQHDR pReqHdr)
 {
-    return binldrReqSmnRwWorker(pBinLdrState, pReqHdr, 1 /*fWrite*/);
+    return pspstubReqSmnRwWorker(pBinLdrState, pReqHdr, 1 /*fWrite*/);
 }
 
 
-static int32_t binldrReqPspRwWorker(PBINLOADERSTATE pBinLdrState, PBINLOADERREQHDR pReqHdr, uint8_t fWrite)
+static int32_t pspstubReqPspRwWorker(PPSPSTUBSTATE pBinLdrState, PPSPSTUBREQHDR pReqHdr, uint8_t fWrite)
 {
-    PCBINLOADERREQPSPRW pReq = (PCBINLOADERREQPSPRW)pReqHdr;
+    PCPSPSTUBREQPSPRW pReq = (PCPSPSTUBREQPSPRW)pReqHdr;
     void *pvAddrPsp = (void *)pReq->u32Addr;
     int32_t rc = PSPSTATUS_SUCCESS;
 
@@ -313,21 +294,21 @@ static int32_t binldrReqPspRwWorker(PBINLOADERSTATE pBinLdrState, PBINLOADERREQH
     return rc;
 }
 
-static int32_t binldrReqPspRead(PBINLOADERSTATE pBinLdrState, PBINLOADERREQHDR pReqHdr)
+static int32_t pspstubReqPspRead(PPSPSTUBSTATE pBinLdrState, PPSPSTUBREQHDR pReqHdr)
 {
-    return binldrReqPspRwWorker(pBinLdrState, pReqHdr, 0 /*fWrite*/);
+    return pspstubReqPspRwWorker(pBinLdrState, pReqHdr, 0 /*fWrite*/);
 }
 
 
-static int32_t binldrReqPspWrite(PBINLOADERSTATE pBinLdrState, PBINLOADERREQHDR pReqHdr)
+static int32_t pspstubReqPspWrite(PPSPSTUBSTATE pBinLdrState, PPSPSTUBREQHDR pReqHdr)
 {
-    return binldrReqPspRwWorker(pBinLdrState, pReqHdr, 1 /*fWrite*/);
+    return pspstubReqPspRwWorker(pBinLdrState, pReqHdr, 1 /*fWrite*/);
 }
 
 
-static int32_t binldrReqSvcCall(PBINLOADERSTATE pBinLdrState, PBINLOADERREQHDR pReqHdr)
+static int32_t pspstubReqSvcCall(PPSPSTUBSTATE pBinLdrState, PPSPSTUBREQHDR pReqHdr)
 {
-    PBINLOADERREQCALLSVC pReq = (PBINLOADERREQCALLSVC)pReqHdr;
+    PPSPSTUBREQCALLSVC pReq = (PPSPSTUBREQCALLSVC)pReqHdr;
 
     /* Modify the svc template to call the requested syscall. */
     volatile uint8_t *pbSyscall = (volatile uint8_t *)svc_template;
@@ -351,9 +332,9 @@ static int32_t binldrReqSvcCall(PBINLOADERSTATE pBinLdrState, PBINLOADERREQHDR p
 }
 
 
-static int32_t binldrReqQueryInfo(PBINLOADERSTATE pBinLdrState, PBINLOADERREQHDR pReqHdr)
+static int32_t pspstubReqQueryInfo(PPSPSTUBSTATE pBinLdrState, PPSPSTUBREQHDR pReqHdr)
 {
-    PBINLOADERREQQUERYINFO pReq = (PBINLOADERREQQUERYINFO)pReqHdr;
+    PPSPSTUBREQQUERYINFO pReq = (PPSPSTUBREQQUERYINFO)pReqHdr;
 
     pReq->u32PspScratchAddr = (uint32_t)(uintptr_t)&g_abScratch[0];
     pReq->cbScratch         = sizeof(g_abScratch);
@@ -363,16 +344,16 @@ static int32_t binldrReqQueryInfo(PBINLOADERSTATE pBinLdrState, PBINLOADERREQHDR
 
 
 /** Request handlers. */
-static const BINLOADERREQHANDLER g_aReqHandlers[] =
+static const PSPSTUBREQHANDLER g_aReqHandlers[] =
 {
-    { sizeof(BINLOADERREQLOADBIN),   binldrReqLoadBin   },
-    { sizeof(BINLOADERREQEXECBIN),   binldrReqExecBin   },
-    { sizeof(BINLOADERREQSMNRW),     binldrReqSmnRead   },
-    { sizeof(BINLOADERREQSMNRW),     binldrReqSmnWrite  },
-    { sizeof(BINLOADERREQPSPRW),     binldrReqPspRead   },
-    { sizeof(BINLOADERREQPSPRW),     binldrReqPspWrite  },
-    { sizeof(BINLOADERREQCALLSVC),   binldrReqSvcCall   },
-    { sizeof(BINLOADERREQQUERYINFO), binldrReqQueryInfo }
+    { sizeof(PSPSTUBREQLOADBIN),   pspstubReqLoadBin   },
+    { sizeof(PSPSTUBREQEXECBIN),   pspstubReqExecBin   },
+    { sizeof(PSPSTUBREQSMNRW),     pspstubReqSmnRead   },
+    { sizeof(PSPSTUBREQSMNRW),     pspstubReqSmnWrite  },
+    { sizeof(PSPSTUBREQPSPRW),     pspstubReqPspRead   },
+    { sizeof(PSPSTUBREQPSPRW),     pspstubReqPspWrite  },
+    { sizeof(PSPSTUBREQCALLSVC),   pspstubReqSvcCall   },
+    { sizeof(PSPSTUBREQQUERYINFO), pspstubReqQueryInfo }
 };
 
 
@@ -383,32 +364,32 @@ typedef struct BINLDRSLVREQ
 } BINLDRSLVREQ;
 typedef BINLDRSLVREQ *PBINLDRSLVREQ;
 
-uint32_t main(uint32_t idCcx, uint32_t cCcxs, PSEVCMDBUF pCmdBuf, uint8_t fFirstRun)
+uint32_t main(uint32_t idCcd, uint32_t cCcds, PSEVCMDBUF pCmdBuf, uint8_t fFirstRun)
 {
-    if (bin_ldr_ctx_load_or_init(&g_BinLdrState, idCcx, cCcxs, fFirstRun) != PSPSTATUS_SUCCESS)
+    if (bin_ldr_ctx_load_or_init(&g_StubState, idCcd, cCcds, fFirstRun) != PSPSTATUS_SUCCESS)
         return 1;
 
-    g_BinLdrState.Hlp.pvCmdBuf = (void *)pCmdBuf;
+    g_StubState.Hlp.pvCmdBuf = (void *)pCmdBuf;
 
-    if (idCcx == 0)
+    if (idCcd == 0)
     {
         uint32_t idCmd = (pCmdBuf->idCmd >> 16) & 0xff;
         X86PADDR PhysX86AddrReqBuf = (X86PADDR)pCmdBuf->PhysX86CmdBufHigh << 32 | pCmdBuf->PhysX86CmdBufLow;
 
-        if (idCmd >= BIN_LOADER_REQ_FIRST && idCmd <= BIN_LOADER_REQ_LAST)
+        if (idCmd >= PSP_STUB_REQ_FIRST && idCmd <= PSP_STUB_REQ_LAST)
         {
-            PCBINLOADERREQHANDLER pHandler = &g_aReqHandlers[idCmd - BIN_LOADER_REQ_FIRST];
-            BINLOADERREQ BinLoaderReq;
+            PCPSPSTUBREQHANDLER pHandler = &g_aReqHandlers[idCmd - PSP_STUB_REQ_FIRST];
+            PSPSTUBREQ BinLoaderReq;
 
             LogRel("Loading request buffer from %#X (%u bytes)\n", PhysX86AddrReqBuf, pHandler->cbReq);
             int rc = bin_ldr_read_from_x86(PhysX86AddrReqBuf, &BinLoaderReq, pHandler->cbReq);
             if (rc == PSPSTATUS_SUCCESS)
             {
                 /* Check whether the request is designated for us or one of the slaves. */
-                if (BinLoaderReq.Hdr.idCcx == 0)
+                if (BinLoaderReq.Hdr.idCcd == 0)
                 {
                     /* Execute handler and pass return value back. */
-                    int32_t rcReq = pHandler->pfnReq(&g_BinLdrState, &BinLoaderReq.Hdr);
+                    int32_t rcReq = pHandler->pfnReq(&g_StubState, &BinLoaderReq.Hdr);
                     BinLoaderReq.Hdr.i32Sts = rcReq;
                     rc = bin_ldr_write_to_x86(PhysX86AddrReqBuf, &BinLoaderReq, pHandler->cbReq);
                     if (rc != PSPSTATUS_SUCCESS)
@@ -418,10 +399,10 @@ uint32_t main(uint32_t idCcx, uint32_t cCcxs, PSEVCMDBUF pCmdBuf, uint8_t fFirst
                 {
                     BINLDRSLVREQ SlvReq;
 
-                    LogRel("Poking slave CCX %u\n", BinLoaderReq.Hdr.idCcx);
+                    LogRel("Poking slave CCD %u\n", BinLoaderReq.Hdr.idCcd);
                     SlvReq.idCmd             = idCmd;
                     SlvReq.PhysX86AddrReqBuf = PhysX86AddrReqBuf;
-                    uint32_t rcPsp = svc_call_other_psp(BinLoaderReq.Hdr.idCcx, &SlvReq, sizeof(SlvReq));
+                    uint32_t rcPsp = svc_call_other_psp(BinLoaderReq.Hdr.idCcd, &SlvReq, sizeof(SlvReq));
                     LogRel("Poking slave returned %u\n", rcPsp);
                 }
             }
@@ -436,15 +417,15 @@ uint32_t main(uint32_t idCcx, uint32_t cCcxs, PSEVCMDBUF pCmdBuf, uint8_t fFirst
         PBINLDRSLVREQ pSlvReq = (PBINLDRSLVREQ)pCmdBuf;
 
         LogRel("Got kicked by master\n");
-        PCBINLOADERREQHANDLER pHandler = &g_aReqHandlers[pSlvReq->idCmd - BIN_LOADER_REQ_FIRST];
-        BINLOADERREQ BinLoaderReq;
+        PCPSPSTUBREQHANDLER pHandler = &g_aReqHandlers[pSlvReq->idCmd - PSP_STUB_REQ_FIRST];
+        PSPSTUBREQ BinLoaderReq;
 
         LogRel("Loading request buffer from %#X (%u bytes)\n", pSlvReq->PhysX86AddrReqBuf, pHandler->cbReq);
         int rc = bin_ldr_read_from_x86(pSlvReq->PhysX86AddrReqBuf, &BinLoaderReq, pHandler->cbReq);
         if (rc == PSPSTATUS_SUCCESS)
         {
             /* Execute handler and pass return value back. */
-            int32_t rcReq = pHandler->pfnReq(&g_BinLdrState, &BinLoaderReq.Hdr);
+            int32_t rcReq = pHandler->pfnReq(&g_StubState, &BinLoaderReq.Hdr);
             BinLoaderReq.Hdr.i32Sts = rcReq;
             rc = bin_ldr_write_to_x86(pSlvReq->PhysX86AddrReqBuf, &BinLoaderReq, pHandler->cbReq);
             if (rc != PSPSTATUS_SUCCESS)
@@ -454,6 +435,6 @@ uint32_t main(uint32_t idCcx, uint32_t cCcxs, PSEVCMDBUF pCmdBuf, uint8_t fFirst
             LogRel("Reading request buffer failed with %d\n", rc);
     }
 
-    bin_ldr_ctx_save(&g_BinLdrState);
+    bin_ldr_ctx_save(&g_StubState);
     return 0;
 }

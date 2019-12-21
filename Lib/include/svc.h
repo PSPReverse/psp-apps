@@ -2,7 +2,7 @@
 #define __include_svc_h
 
 #include <types.h>
-#include <svc_id.h>
+#include <psp-fw/svc_id.h>
 
 typedef enum SVC_INV_MEM_OP
 {

@@ -1,4 +1,4 @@
-#include "../include/svc_id.h"
+#include "../../include/psp-fw/svc_id.h"
 
 .section .text
 

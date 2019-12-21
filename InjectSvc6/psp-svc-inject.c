@@ -2,7 +2,7 @@
 #include <cdefs.h>
 #include <psp.h>
 
-#include <svc_id.h>
+#include <psp-fw/svc_id.h>
 
 #define SVC_TRACE_FMT_STRING_COMPACT
 #include "psp-svc-trace.h"
