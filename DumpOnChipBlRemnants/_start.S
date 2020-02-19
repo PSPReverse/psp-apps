@@ -1,6 +1,6 @@
 .extern main
 _start:
-  ldr r0, =0x35800
+  ldr r0, =0x38500
   ldr r1, =0x40000
   ldr r2, =0x01aab000
 
