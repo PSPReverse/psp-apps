@@ -279,7 +279,7 @@ static int pspStubX86PhysUnmapByPtr(PPSPSTUBSTATE pThis, void *pv)
 
 
 /**
- * Maps the given x86 physical address into the PSP address space.
+ * Maps the given SMN address into the PSP address space.
  *
  * @returns Status code.
  * @param   pThis                   The serial stub instance data.
@@ -471,6 +471,7 @@ static void pspStubTimerHandle(PPSPTIMER pTimer)
     }
 
     pTimer->cSubMsTicks = cTicksPassed;
+    pTimer->cCnts       = cCnts;
 }
 
 
@@ -606,7 +607,7 @@ static int pspStubPduValidate(PPSPSTUBSTATE pThis, PCPSPSERIALPDUHDR pHdr)
     /* Check whether the footer magic and checksum are valid. */
     PCPSPSERIALPDUFOOTER pFooter = (PCPSPSERIALPDUFOOTER)pbPayload;
     if (   uChkSum + pFooter->u32ChkSum != 0
-        || pFooter->u32Magic == PSP_SERIAL_EXT_2_PSP_PDU_END_MAGIC)
+        || pFooter->u32Magic != PSP_SERIAL_EXT_2_PSP_PDU_END_MAGIC)
         return -1;
 
     return 0;
@@ -623,6 +624,8 @@ static int pspStubPduValidate(PPSPSTUBSTATE pThis, PCPSPSERIALPDUHDR pHdr)
 static int pspStubPduRecvAdvance(PPSPSTUBSTATE pThis, PCPSPSERIALPDUHDR *ppPduRcvd)
 {
     int rc = INF_SUCCESS;
+
+    *ppPduRcvd = NULL;
 
     switch (pThis->enmPduRecvState)
     {
@@ -723,7 +726,7 @@ static int pspStubPduRecv(PPSPSTUBSTATE pThis, PCPSPSERIALPDUHDR *ppPduRcvd, uin
             }
         }
     } while (   !rc
-             &&    (pspStubGetMillies(pThis) - tsStartMs < cMillies)
+             &&  (pspStubGetMillies(pThis) - tsStartMs < cMillies)
                 || (cMillies == PSP_SERIAL_STUB_INDEFINITE_WAIT));
 
     if (tsStartMs + pspStubGetMillies(pThis) >= cMillies)
@@ -1171,7 +1174,7 @@ void main(void)
     pThis->fConnected                  = false;
     pThis->cBeaconsSent                = 0;
     pThis->cPdusSent                   = 0;
-    pThis->cPduRecvNext                = 0;
+    pThis->cPduRecvNext                = 1;
     pspStubPduRecvReset(pThis);
     memset(&pThis->aX86MapSlots[0], 0, sizeof(pThis->aX86MapSlots));
     memset(&pThis->aSmnMapSlots[0], 0, sizeof(pThis->aSmnMapSlots));
