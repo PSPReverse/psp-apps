@@ -74,6 +74,14 @@ void TMTick(PTM pTm)
     tmRunSlots(pTm);
 }
 
+void TMTickMultiple(PTM pTm, uint32_t cMillies)
+{
+    pTm->cMillies += cMillies;
+
+    /* Check for expired timers. */
+    tmRunSlots(pTm);
+}
+
 uint32_t TMGetMillies(PTM pTm)
 {
     if (!pTm)
