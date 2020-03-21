@@ -456,10 +456,11 @@ static void pspStubTimerHandle(PPSPTIMER pTimer)
      *
      * 10ns granularity means 100 ticks per us -> 100 * 1000 ticks per ms.
      */
-    while (cTicksPassed >= 100 * 1000)
+    if (cTicksPassed >= 100 * 1000)
     {
-        TMTick(&pTimer->Tm);
-        cTicksPassed -= 100 * 1000;
+        uint32_t cMsPassed = cTicksPassed / (100 * 1000);
+        TMTickMultiple(&pTimer->Tm, cMsPassed);
+        cTicksPassed -= cMsPassed * (100 * 1000);
     }
 
     /* Check whether the remaining ticks added to the accumulated ones exceed 1ms. */
@@ -876,14 +877,14 @@ static int pspStubPduProcessPspMmioXfer(PPSPSTUBSTATE pThis, const void *pvPaylo
     void *pvDst = NULL;
     if (fWrite)
     {
-        enmResponse = PSPSERIALPDURRNID_RESPONSE_PSP_MEM_WRITE;
+        enmResponse = PSPSERIALPDURRNID_RESPONSE_PSP_MMIO_WRITE;
         pvDst = (void *)(uintptr_t)pReq->PspAddrStart;
         pvSrc = (pReq + 1);
         pspStubMmioAccess(pvDst, (pReq + 1), cbXfer);
     }
     else
     {
-        enmResponse   = PSPSERIALPDURRNID_RESPONSE_PSP_MEM_READ;
+        enmResponse   = PSPSERIALPDURRNID_RESPONSE_PSP_MMIO_READ;
         pvSrc = (void *)(uintptr_t)pReq->PspAddrStart;
         pvDst = &abRead[0];
         pspStubMmioAccess(&abRead[0], pvSrc, cbXfer);
