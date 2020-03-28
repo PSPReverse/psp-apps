@@ -29,4 +29,8 @@
  */
 int psp_x86_memory_copy_from_host_fallback(X86PADDR PhysX86AddrSrc, void *pvDst, size_t cbCopy);
 
+int psp_x86_mmio_read(X86PADDR PhysX86AddrSrc, void *pvDst, size_t cbRead);
+
+int psp_x86_mmio_write(X86PADDR PhysX86AddrDst, const void *pvSrc, size_t cbWrite);
+
 #endif /* ___x86mem_h */

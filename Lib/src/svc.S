@@ -68,9 +68,16 @@ svc_query_two_64bit_values:
 /* uint16_t svc_x86_host_memory_copy_to_psp(PPSPX86MEMCOPYREQ pReq) */
 .globl svc_x86_host_memory_copy_to_psp;
 svc_x86_host_memory_copy_to_psp:
-    svc #SVC_X86_HOST_COPY_FROM_TO_PSP
+    svc #SVC_X86_HOST_COPY_TO_PSP
     mov pc, lr
 .type svc_x86_host_memory_copy_to_psp, %function;
+
+/* uint16_t svc_x86_host_memory_copy_from_psp(PPSPX86MEMCOPYREQ pReq) */
+.globl svc_x86_host_memory_copy_from_psp;
+svc_x86_host_memory_copy_from_psp:
+    svc #SVC_X86_HOST_COPY_FROM_PSP
+    mov pc, lr
+.type svc_x86_host_memory_copy_from_psp, %function;
 
 /* uint32_t svc_call_other_psp(uint32_t idCcx, void *pvReq, size_t cbReq) */
 .globl svc_call_other_psp;
