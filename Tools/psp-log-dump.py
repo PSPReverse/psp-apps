@@ -49,7 +49,8 @@ class PspLogExtractor(object):
 
     def __init__(self):
         self.sToolName        = None;
-        self.sInputCsv        = None;
+        self.sInput           = None;
+        self.fInputCsv        = True;
         self.sOutputLog       = None;
         self.dPspDetected     = { };  # The dictionary containing the detected PSPs keyed by ID
 
@@ -60,6 +61,8 @@ class PspLogExtractor(object):
         print('%s Options:' % (self.sToolName,));
         print('  --input-csv       <path to logic trace in CSV format>');
         print('      The path to the logic trace in CSV format');
+        print('  --input-binary    <path to logic trace in binary>');
+        print('      The path to the logic trace in raw binary format');
         print('  --output          <extracted log path>');
         print('      Where to store the extracted log');
 
@@ -70,7 +73,13 @@ class PspLogExtractor(object):
         if asArgs[iArg] == '--input-csv':
             iArg += 1;
             if iArg >= len(asArgs): raise Exception('Invalid option', '--input-csv takes a file path');
-            self.sInputCsv = asArgs[iArg];
+            self.sInput = asArgs[iArg];
+            self.fInputCsv = True;
+        elif asArgs[iArg] == '--input-binary':
+            iArg += 1;
+            if iArg >= len(asArgs): raise Exception('Invalid option', '--input-binary takes a file path');
+            self.sInput = asArgs[iArg];
+            self.fInputCsv = False;
         elif asArgs[iArg] == '--output':
             iArg += 1;
             if iArg >= len(asArgs): raise Exception('Invalid option', '--output takes a file path');
@@ -100,22 +109,28 @@ class PspLogExtractor(object):
             sys.exit(1);
 
         # Check that all required options present.
-        if    self.sInputCsv is None\
+        if    self.sInput is None\
            or self.sOutputLog is None:
             print('A required option is missing');
             self.showUsage();
             sys.exit(1);
 
-        # Load the CSV
-        oInputCsv = open(self.sInputCsv);
-        oCsvRdr = csv.reader(oInputCsv, delimiter=',');
+        if self.fInputCsv:
+            # Load the CSV
+            oInputCsv = open(self.sInput);
+            oCsvRdr = csv.reader(oInputCsv, delimiter=',');
 
-        # Extract the MOSI lines and convert to byte array
-        # @todo Improve and don't require to create a big chunk of memory.
-        sRes = ' '.join(sLine[2].strip()[2:] for sLine in oCsvRdr);
-        abBytes = bytearray.fromhex(sRes[3:]);
+            # Extract the MOSI lines and convert to byte array
+            # @todo Improve and don't require to create a big chunk of memory.
+            sRes = ' '.join(sLine[2].strip()[2:] for sLine in oCsvRdr);
+            abBytes = bytearray.fromhex(sRes[3:]);
 
-        oInputCsv.close();
+            oInputCsv.close();
+        else:
+            oInputBin = open(self.sInput, 'rb');
+            abBytes = bytearray(oInputBin.read());
+            oInputBin.close();
+
         oLogOut = open(self.sOutputLog + '.raw', "wb");
         oLogOut.write(abBytes);
         oLogOut.close();
