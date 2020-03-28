@@ -145,6 +145,8 @@ typedef struct PSPSTUBSTATE
     uint32_t                    cCcds;
     /** Flag whether someone is connected. */
     bool                        fConnected;
+    /** Flag whether we are in the early logging over SPI phase. */
+    bool                        fEarlyLogOverSpi;
     /** Number of beacons sent. */
     uint32_t                    cBeaconsSent;
     /** Number of PDUs sent so far. */
@@ -167,6 +169,7 @@ typedef PSPSTUBSTATE *PPSPSTUBSTATE;
 
 /** The global stub state. */
 static PSPSTUBSTATE g_StubState;
+static uint32_t off = 0;
 
 
 /**
@@ -189,7 +192,7 @@ static int pspStubX86PhysMap(PPSPSTUBSTATE pThis, X86PADDR PhysX86Addr, bool fMm
 
     PPSPX86MAPPING pMapping = NULL;
     uint32_t idxSlot = 0;
-    for (uint32_t i = 0; i < ELEMENTS(pThis->aX86MapSlots); i++)
+    for (uint32_t i = fMmio ? 8 : 0; i < ELEMENTS(pThis->aX86MapSlots); i++)
     {
         if (   (   pThis->aX86MapSlots[i].PhysX86AddrBase == NIL_X86PADDR
                 && pThis->aX86MapSlots[i].cRefs == 0)
@@ -218,8 +221,10 @@ static int pspStubX86PhysMap(PPSPSTUBSTATE pThis, X86PADDR PhysX86Addr, bool fMm
             *(volatile uint32_t *)(PspAddrSlotBase + 12) = uMemType;
             *(volatile uint32_t *)(0x032303e0 + idxSlot * sizeof(uint32_t)) = 0xffffffff;
             *(volatile uint32_t *)(0x032304d8 + idxSlot * sizeof(uint32_t)) = 0xc0000000;
+            *(volatile uint32_t *)0x32305ec = 0x3333;
         }
 
+        asm volatile("dsb #0xf\nisb #0xf\n": : :"memory");
         pMapping->cRefs++;
         *ppv = (void *)(0x04000000 + idxSlot * _64M + offStart);
     }
@@ -249,6 +254,7 @@ static int pspStubX86PhysUnmapByPtr(PPSPSTUBSTATE pThis, void *pv)
     {
         PPSPX86MAPPING pMapping = &pThis->aX86MapSlots[idxSlot];
 
+        asm volatile("dsb #0xf\nisb #0xf\n": : :"memory");
         if (pMapping->cRefs > 0)
         {
             pMapping->cRefs--;
@@ -286,7 +292,7 @@ static int pspStubX86PhysUnmapByPtr(PPSPSTUBSTATE pThis, void *pv)
  * @param   SmnAddr                 The SMN address to map.
  * @param   ppv                     Where to store the pointer to the mapping on success.
  */
-static int pspStubSmnPhysMap(PPSPSTUBSTATE pThis, SMNADDR SmnAddr, void **ppv)
+static int pspStubSmnMap(PPSPSTUBSTATE pThis, SMNADDR SmnAddr, void **ppv)
 {
     int rc = INF_SUCCESS;
 
@@ -331,6 +337,7 @@ static int pspStubSmnPhysMap(PPSPSTUBSTATE pThis, SMNADDR SmnAddr, void **ppv)
     else
         rc = ERR_INVALID_STATE;
 
+    LogRel("pspStubSmnUnmapByPtr: SmnAddr=%#x -> rc=%d,pv=%p\n", SmnAddr, rc, *ppv);
     return rc;
 }
 
@@ -378,6 +385,7 @@ static int pspStubSmnUnmapByPtr(PPSPSTUBSTATE pThis, void *pv)
     else
         rc = ERR_INVALID_PARAMETER;
 
+    LogRel("pspStubSmnUnmapByPtr: pv=%p -> rc=%d\n", pv, rc);
     return rc;
 }
 
@@ -498,6 +506,13 @@ static uint32_t pspStubTimerGetMillies(PPSPTIMER pTimer)
 static inline uint32_t pspStubGetMillies(PPSPSTUBSTATE pThis)
 {
     return pspStubTimerGetMillies(&pThis->Timer);
+}
+
+
+static void pspStubDelayMs(PPSPSTUBSTATE pThis, uint32_t cMillies)
+{
+    uint32_t tsStart = pspStubGetMillies(pThis);
+    while (pspStubGetMillies(pThis) <= tsStart + cMillies);
 }
 
 
@@ -920,7 +935,7 @@ static int pspStubPduProcessPspSmnXfer(PPSPSTUBSTATE pThis, const void *pvPayloa
                                     ? PSPSERIALPDURRNID_RESPONSE_PSP_SMN_WRITE
                                     : PSPSERIALPDURRNID_RESPONSE_PSP_SMN_READ;
     void *pvMap = NULL;
-    int rc = pspStubSmnPhysMap(pThis, pReq->SmnAddrStart, &pvMap);
+    int rc = pspStubSmnMap(pThis, pReq->SmnAddrStart, &pvMap);
     if (!rc)
     {
         const void *pvRespPayload = NULL;
@@ -1097,6 +1112,195 @@ static int pspStubPduProcess(PPSPSTUBSTATE pThis, PCPSPSERIALPDUHDR pPdu)
 }
 
 
+static void pspStubMmioWrU32(PSPADDR PspAddrMmio, uint32_t uVal)
+{
+    pspStubMmioAccess((void *)PspAddrMmio, &uVal, sizeof(uint32_t));
+}
+
+
+static void pspStubMmioSetU32(PSPADDR PspAddrMmio, uint32_t fSet)
+{
+    uint32_t uVal;
+    pspStubMmioAccess(&uVal, (void *)PspAddrMmio, sizeof(uint32_t));
+    LogRel("pspStubMmioSetU32: PspAddrMmio=%#x fSet=%#x uVal=%#x\n",
+           PspAddrMmio, fSet, uVal);
+    uVal |= fSet;
+    pspStubMmioAccess((void *)PspAddrMmio, &uVal, sizeof(uint32_t));
+}
+
+
+static void pspStubMmioClearU32(PSPADDR PspAddrMmio, uint32_t fClr)
+{
+    uint32_t uVal;
+    pspStubMmioAccess(&uVal, (void *)PspAddrMmio, sizeof(uint32_t));
+    LogRel("pspStubMmioClearU32: PspAddrMmio=%#x fClr=%#x uVal=%#x\n",
+           PspAddrMmio, fClr, uVal);
+    uVal &= ~fClr;
+    pspStubMmioAccess((void *)PspAddrMmio, &uVal, sizeof(uint32_t));
+}
+
+
+static void pspStubMmioWaitOnClrU32(PSPADDR PspAddrMmio, uint32_t fWait)
+{
+    uint32_t uVal = 0;
+
+    do
+    {
+        pspStubMmioAccess(&uVal, (void *)PspAddrMmio, sizeof(uint32_t));
+    } while (uVal & fWait != 0);
+}
+
+
+static void pspStubSmnSetU32(PPSPSTUBSTATE pThis, SMNADDR SmnAddr, uint32_t fSet)
+{
+    void *pvMap = NULL;
+    int rc = pspStubSmnMap(pThis, SmnAddr, &pvMap);
+    if (!rc)
+    {
+        pspStubMmioSetU32((PSPADDR)pvMap, fSet);
+        pspStubSmnUnmapByPtr(pThis, pvMap);
+    }
+}
+
+
+static void pspStubSmnAndOrU32(PPSPSTUBSTATE pThis, SMNADDR SmnAddr, uint32_t fAnd, uint32_t fOr)
+{
+    void *pvMap = NULL;
+    int rc = pspStubSmnMap(pThis, SmnAddr, &pvMap);
+    if (!rc)
+    {
+        uint32_t uVal;
+        pspStubMmioAccess(&uVal, (void *)pvMap, sizeof(uint32_t));
+        uint32_t uValNew = (uVal & fAnd) | fOr;
+        LogRel("pspStubSmnAndOrU32: SmnAddr=%#x fAnd=%#x fOr=%#x uVal=%#x uValNew=%#x\n",
+               SmnAddr, fAnd, fOr, uVal, uValNew);
+        pspStubMmioAccess((void *)pvMap, &uValNew, sizeof(uint32_t));
+        pspStubSmnUnmapByPtr(pThis, pvMap);
+    }
+}
+
+
+static SMNADDR s_aSmnAddrSet[] =
+{
+    0x2f00404,
+    0x2f00c04,
+    0x2f01004,
+    0x2f01404,
+    0x2f01804,
+    0x2f01c04,
+    0x2f02804,
+    0x2f03404,
+    0x2f04c04,
+    0x2f05004,
+    0x2f06004,
+    0x2f07004,
+    0x2f09004,
+    0x2f09404,
+    0x2f09c04,
+    0x2f0b404,
+    0x2f0b804,
+    0x2f0c004,
+    0x2f0c404,
+    0x2f0c804,
+    0x2f0cc04,
+    0x2f0d004,
+    0x2f0d404,
+    0x2f10804,
+    0x2f11804,
+    0x2f11c04,
+    0x2f14004,
+    0x2f14404,
+    0x2f14804,
+    0x2f14c04,
+    0x2f15004,
+    0x2f15404,
+    0x2f15804,
+    0x2f15c04,
+    0x2f16804,
+    0x2f16c04,
+    0x2f19004,
+    0x2f1b004,
+    0x2f1b404,
+    0x2f1b804,
+    0x2f1f004,
+    0x2f20004,
+    0x2f20404,
+    0x2f24004,
+    0x2f25804,
+    0x2f25c04,
+    0x2f2a004,
+    0x2f2a804,
+    0x2f2c004,
+    0x2f2c404,
+    0x2f36004,
+    0x2f38004,
+    0x2f38404,
+    0x2f38804,
+    0x2f38c04,
+    0x2f39004,
+    0x2f39404,
+    0x2f39804,
+    0x2f3fc04
+};
+
+static void pspStubInitHwUnkSmnRanges(PPSPSTUBSTATE pThis)
+{
+    for (uint32_t i = 0; i < ELEMENTS(s_aSmnAddrSet); i++)
+        pspStubSmnAndOrU32(pThis, s_aSmnAddrSet[i], 0xffffffff, 0x4);
+}
+
+
+static void pspStubInitHw(PPSPSTUBSTATE pThis)
+{
+    pspStubMmioWaitOnClrU32(0x32000f0, 0x80000000);
+
+    /* Missing something here... */
+
+    pspStubInitHwUnkSmnRanges(pThis);
+    pspStubMmioWrU32(0x3010618, 0);
+    pspStubMmioWrU32(0x301061c, 0);
+    pspStubMmioWrU32(0x3010620, 0);
+    pspStubMmioWrU32(0x3010624, 0);
+
+    pspStubSmnAndOrU32(pThis, 0x2d013ec, 0xffffffff, 0x14);
+    pspStubSmnAndOrU32(pThis, 0x2d01344, 0xf7ffffff, 0x80000000);
+    pspStubSmnAndOrU32(pThis, 0x17400404, 0xffffffff, 0x3ff);
+    pspStubSmnAndOrU32(pThis, 0x17500404, 0xffffffff, 0x3ff);
+    pspStubSmnAndOrU32(pThis, 0x0105a008, 0xfffffffe, 0);
+    pspStubSmnAndOrU32(pThis, 0x0105b008, 0xfffffffe, 0);
+    pspStubDelayMs(pThis, 100);
+    pspStubSmnAndOrU32(pThis, 0x0105b008, 0xffffffff, 1);
+    pspStubSmnAndOrU32(pThis, 0x0105a008, 0xffffffff, 1);
+
+    pspStubDelayMs(pThis, 1000);
+    pspStubMmioWrU32(0x301003c, 1);
+
+    /* Clearing base addresses of x86 mapping control registers. */
+    pspStubMmioWrU32(0x3230000, 0);
+    pspStubMmioWrU32(0x3230004, 0);
+    pspStubMmioWrU32(0x3230008, 0);
+    pspStubMmioWrU32(0x323000c, 0);
+    pspStubMmioWrU32(0x32303e0, 0);
+    pspStubMmioWrU32(0x32304d8, 0);
+}
+
+
+static uint32_t pspStubGetPhysDieId(PPSPSTUBSTATE pThis)
+{
+    void *pvMap = NULL;
+    int rc = pspStubSmnMap(pThis, 0x5a078, &pvMap);
+    if (!rc)
+    {
+        uint32_t uVal;
+        pspStubMmioAccess(&uVal, (void *)pvMap, sizeof(uint32_t));
+        pspStubSmnUnmapByPtr(pThis, pvMap);
+        return uVal & 0x3;
+    }
+
+    return 0xffffffff;
+}
+
+
 /**
  * The mainloop.
  *
@@ -1158,7 +1362,80 @@ static void pspStubLogFlush(void *pvUser, uint8_t *pbBuf, size_t cbBuf)
 {
     PPSPSTUBSTATE pThis = (PPSPSTUBSTATE)pvUser;
 
-    pspStubPduSend(pThis, INF_SUCCESS, 0 /*idCcd*/, PSPSERIALPDURRNID_NOTIFICATION_LOG_MSG, pbBuf, cbBuf);
+    if (pThis->fEarlyLogOverSpi)
+    {
+        while (cbBuf >= 4)
+        {
+            *(volatile uint32_t *)(0x02aab000 + off) = *(uint32_t *)pbBuf;
+            off   += 4;
+            cbBuf -= 4;
+            pbBuf += 4;
+        }
+
+        if (cbBuf)
+        {
+            uint32_t uVal = 0;
+            switch (cbBuf)
+            {
+                case 3:
+                    uVal = '\n' << 24 | pbBuf[2] << 16 | pbBuf[1] << 8 | pbBuf[0];
+                    break;
+                case 2:
+                    uVal = '\n' << 24 | '\n' << 16 | pbBuf[1] << 8 | pbBuf[0];
+                    break;
+                case 1:
+                    uVal = '\n' << 24 | '\n' << 16 | '\n' << 8 | pbBuf[0];
+                default:
+                    break;
+            }
+
+            *(volatile uint32_t *)(0x02aab000 + off) = uVal;
+            off   += 4;
+        }
+    }
+    else
+        pspStubPduSend(pThis, INF_SUCCESS, 0 /*idCcd*/, PSPSERIALPDURRNID_NOTIFICATION_LOG_MSG, pbBuf, cbBuf);
+}
+
+
+void ExcpUndefInsn(void)
+{
+    LogRel("ExcpUndefInsn:\n");
+    for (;;);
+}
+
+void ExcpSwi(void)
+{
+    LogRel("ExcpSwi:\n");
+    for (;;);
+}
+
+
+void ExcpPrefAbrt(void)
+{
+    LogRel("ExcpPrefAbrt:\n");
+    for (;;);
+}
+
+
+void ExcpDataAbrt(void)
+{
+    LogRel("ExcpDataAbrt:\n");
+    for (;;);
+}
+
+
+void ExcpIrq(void)
+{
+    LogRel("ExcpIrq:\n");
+    for (;;);
+}
+
+
+void ExcpFiq(void)
+{
+    LogRel("ExcpFiq:\n");
+    for (;;);
 }
 
 
@@ -1167,12 +1444,15 @@ void main(void)
     /* Init the stub state and create the UART driver instances. */
     PPSPSTUBSTATE pThis = &g_StubState;
 
+    off = 0;
+
     pThis->X86Uart.PhysX86UartBase     = 0xfffdfc0003f8;
     pThis->X86Uart.pvUart              = NULL;
     pThis->X86Uart.IfIoDev.pfnRegRead  = pspStubX86UartRegRead;
     pThis->X86Uart.IfIoDev.pfnRegWrite = pspStubX86UartRegWrite;
     pThis->cCcds                       = 1; /** @todo Determine the amount of available CCDs (can't be read from boot ROM service page at all times) */
     pThis->fConnected                  = false;
+    pThis->fEarlyLogOverSpi            = true;
     pThis->cBeaconsSent                = 0;
     pThis->cPdusSent                   = 0;
     pThis->cPduRecvNext                = 1;
@@ -1182,32 +1462,47 @@ void main(void)
     for (uint32_t i = 0; i < ELEMENTS(pThis->aX86MapSlots); i++)
         pThis->aX86MapSlots[i].PhysX86AddrBase = NIL_X86PADDR;
 
+    /* Init the timer. */
+    pspStubTimerInit(&pThis->Timer);
+    pThis->pTm = &pThis->Timer.Tm;
+    LOGLoggerInit(&pThis->Logger, pspStubLogFlush, pThis,
+                  "PspSerialStub", pThis->pTm, LOG_LOGGER_INIT_FLAGS_TS_FMT_HHMMSS);
+    LOGLoggerSetDefaultInstance(&pThis->Logger);
+
+    /* Don't do anything if this is not the master PSP. */
+    if (pspStubGetPhysDieId(pThis) != 0)
+    {
+        for (;;);
+    }
+
+    pspStubInitHw(pThis);
+
+    LogRel("main: Hardware initialized\n");
+
     int rc = pspStubX86PhysMap(pThis, pThis->X86Uart.PhysX86UartBase, true /*fMmio*/, (void **)&pThis->X86Uart.pvUart);
     if (!rc)
     {
+        LogRel("main: Mapped x86 UART at %p\n", pThis->X86Uart.pvUart);
         rc = PSPUartCreate(&pThis->Uart, &pThis->X86Uart.IfIoDev);
         if (!rc)
         {
+            LogRel("main: Successfully created instantiated UART device\n");
             rc = PSPUartParamsSet(&pThis->Uart, 115200, PSPUARTDATABITS_8BITS, PSPUARTPARITY_NONE, PSPUARTSTOPBITS_1BIT);
             if (!rc)
             {
-                rc = pspStubTimerInit(&pThis->Timer);
-                if (!rc)
-                {
-                    pThis->pTm = &pThis->Timer.Tm;
-
-                    rc = LOGLoggerInit(&pThis->Logger, pspStubLogFlush, pThis,
-                                       "PspSerialStub", pThis->pTm, LOG_LOGGER_INIT_FLAGS_TS_FMT_HHMMSS);
-                    if (!rc)
-                    {
-                        LOGLoggerSetDefaultInstance(&pThis->Logger);
-                        rc = pspStubMainloop(pThis);
-                    }
-                }
+                LogRel("main: UART configured -> starting mainloop\n");
+                rc = pspStubMainloop(pThis);
             }
+            else
+                LogRel("main: UART configuration failed with %d\n", rc);
         }
+        else
+            LogRel("main: UART instantiation failed with %d\n", rc);
     }
+    else
+        LogRel("main: Mapping x86 UART failed with %d\n", rc);
 
+    LogRel("Serial stub is dead, waiting for reset...\n");
     /* Do not return on error. */
     for (;;);
 }
