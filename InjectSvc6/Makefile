@@ -1,8 +1,8 @@
 CROSS_COMPILE=arm-none-eabi-
-CFLAGS=-Os -I../include -I../Lib/include -std=gnu99 -fomit-frame-pointer -nostartfiles -ffreestanding -Wextra -Werror
+CFLAGS=-Os -g -DIN_PSP -I../include -I../Lib/include -std=gnu99 -fomit-frame-pointer -nostartfiles -ffreestanding -Wextra -Werror
 VPATH=../Lib/src
 
-OBJS = main.o string.o svc.o
+OBJS = main.o string.o svc.o x86mem.o uart.o
 
 all : inject-svc-6.elf inject-svc-6.raw
 
