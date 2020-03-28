@@ -7,11 +7,10 @@
 #include <err.h>
 
 #include "psp-svc-inject.h"
+#include "psp-patch-addr.h"
 
 /** The address we patch the svc 0x6 replacement into. */
 #define PSP_FW_SVC_6_PATCH_ADDR ((void *)0x12000)
-#define PSP_FW_SVC_HANDLER_PATCH_ADDR ((void *)0x544)
-#define PSP_FW_SVC_APP_CLEANUP_HANDLER_PATCH_ADDR ((void *)0x540)
 
 #if 0
 static void puts(const char *pszStr)

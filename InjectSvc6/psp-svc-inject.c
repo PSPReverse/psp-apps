@@ -7,6 +7,8 @@
 #define SVC_TRACE_FMT_STRING_COMPACT
 #include "psp-svc-trace.h"
 
+#include "psp-patch-addr.h"
+
 #define PSP_CCX_ID_ADDR (0xcb00)
 
 //#define PSP_SPI_LOG_SIMPLE 1
@@ -164,17 +166,15 @@ volatile uint32_t g_PspDetectMark4 = SVC_PSP_DETECT_MARKER_4 - 1;
 volatile uint32_t g_PspLogMarkStr  = SVC_PSP_LOG_MARKER_STRING - 1;
 
 
-#define PSP_MAP_X86_HOST_MEMORY_EX_ADDR (0x6090 | 0x1)
 typedef void *FNMAPX86HOSTMEMORYEX(uint64_t PhysX86Addr, uint32_t enmType, uint32_t fFlags);
 typedef FNMAPX86HOSTMEMORYEX *PFNMAPX86HOSTMEMORYEX;
 
 typedef uint32_t FNPSPSVCHANDLER(uint32_t idxSyscall, PPSPREGFRAME pRegs);
 typedef FNPSPSVCHANDLER *PFNPSPSVCHANDLER;
-#define PSP_SVC_HANDLER_ADDR (0x9519)
 
 typedef uint32_t FNPSPINVMEM(uint32_t enmInvOp, uint8_t fData, void *pvStart, uint32_t cb);
 typedef FNPSPINVMEM *PFNPSPINVMEM;
-#define PSP_INV_MEM_ADDR (0x170c | 1)
+
 
 static size_t strlen(const char *pszStr)
 {
@@ -877,7 +877,7 @@ uint32_t svc_trace_intercept(uint32_t idxSyscall, PPSPREGFRAME pRegs)
         case SVC_INJECTED_MAP_X86_HOST_MEMORY_EX:
         {
             uint64_t PhysX86Addr = (uint64_t)pRegs->auGprs[0] | ((uint64_t)pRegs->auGprs[1] << 32);
-            return (uint32_t)(uintptr_t)((PFNMAPX86HOSTMEMORYEX)PSP_MAP_X86_HOST_MEMORY_EX_ADDR)(PhysX86Addr, pRegs->auGprs[2], pRegs->auGprs[3]);
+            return (uint32_t)(uintptr_t)((PFNMAPX86HOSTMEMORYEX)(PSP_MAP_X86_HOST_MEMORY_EX_ADDR | 0x1))(PhysX86Addr, pRegs->auGprs[2], pRegs->auGprs[3]);
         }
         case SVC_INJECTED_DBG_MARKER_1:
         case SVC_INJECTED_DBG_MARKER_2:
@@ -926,7 +926,7 @@ uint32_t svc_trace_intercept(uint32_t idxSyscall, PPSPREGFRAME pRegs)
             return 0;
     }
 
-    uint32_t u32Ret = ((PFNPSPSVCHANDLER)(PSP_SVC_HANDLER_ADDR))(idxSyscall, pRegs);
+    uint32_t u32Ret = ((PFNPSPSVCHANDLER)(PSP_SVC_HANDLER_ADDR | 0x1))(idxSyscall, pRegs);
 
     switch (idxSyscall)
     {
@@ -946,8 +946,8 @@ uint32_t svc_trace_intercept(uint32_t idxSyscall, PPSPREGFRAME pRegs)
                 svcTraceDumpLogMarker();
                 memcpy((void *)AR3B_DBG_OVERRIDE_1_ADDR, &ar3b_dbg_override1[0], sizeof(ar3b_dbg_override1));
                 memcpy((void *)AR3B_DBG_OVERRIDE_2_ADDR, &ar3b_dbg_override2[0], sizeof(ar3b_dbg_override2));
-                ((PFNPSPINVMEM)PSP_INV_MEM_ADDR)(0x2, 0, 0, 0xffffffff);
-                ((PFNPSPINVMEM)PSP_INV_MEM_ADDR)(0x2, 1, 0, 0xffffffff);
+                ((PFNPSPINVMEM)(PSP_INV_MEM_ADDR | 0x1))(0x2, 0, 0, 0xffffffff);
+                ((PFNPSPINVMEM)(PSP_INV_MEM_ADDR | 0x1))(0x2, 1, 0, 0xffffffff);
             }
             break;
         }
@@ -1026,9 +1026,6 @@ void svc_trap_handler(uint32_t *pau32Info)
     while (1);
 }
 
-#define PSP_FW_SVC_HANDLER_PATCH_ADDR ((void *)0x544)
-
-#define PSP_FW_TRAP_HANDLER_PATCH_ADDR ((void *)0x53c)
 
 /**
  * SVC interception handler for logging and tracing.
