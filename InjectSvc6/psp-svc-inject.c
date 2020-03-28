@@ -9,6 +9,8 @@
 
 #define PSP_CCX_ID_ADDR (0xcb00)
 
+//#define PSP_SPI_LOG_SIMPLE 1
+
 static const uint32_t g_u32SevVersId = 0x01001116;
 
 #if 0
@@ -150,6 +152,10 @@ static volatile uint32_t g_fSvcTraceArm = 0;
 
 static uint32_t g_fDumpSmnRegsOnMap = 0;
 
+#ifdef PSP_SPI_LOG_SIMPLE
+static uint32_t off = 0;
+#endif
+
 /* These are here so that the log dumper doesn't get triggered when the app containing the injection code gets triggered. */
 volatile uint32_t g_PspDetectMark1 = SVC_PSP_DETECT_MARKER_1 - 1;
 volatile uint32_t g_PspDetectMark2 = SVC_PSP_DETECT_MARKER_2 - 1;
@@ -187,7 +193,9 @@ static size_t strlen(const char *pszStr)
  */
 static void svcTraceDumpVal(uint16_t u16Val)
 {
+#ifndef PSP_SPI_LOG_SIMPLE
     *(volatile uint32_t *)0x01AAB000 = (g_uCpuId << 16) | (uint32_t)u16Val;
+#endif
 }
 
 static void svcTraceBegin(void)
@@ -211,6 +219,7 @@ static void svcTraceEnd(void)
 #if defined(SVC_TRACE_FMT_STRING) || defined(SVC_TRACE_FMT_STRING_COMPACT)
 static void svcTraceAppendBufReverse(char *pachBuf, uint32_t offBuf)
 {
+#ifndef PSP_SPI_LOG_SIMPLE
     size_t cchAlign = offBuf & ~(uint32_t)0x1;
 
     while (cchAlign > 0)
@@ -223,10 +232,44 @@ static void svcTraceAppendBufReverse(char *pachBuf, uint32_t offBuf)
     /* Unaligned byte. */
     if (offBuf)
         svcTraceDumpVal(pachBuf[offBuf - 1]);
+#else
+    size_t cchAlign = offBuf & ~(uint32_t)0x3;
+
+    while (cchAlign >= 4)
+    {
+        uint32_t uVal = pachBuf[offBuf - 4] << 24 | pachBuf[offBuf - 3] << 16 | pachBuf[offBuf - 2] << 8 | pachBuf[offBuf - 1];
+        *(volatile uint32_t *)(0x01aab000 + off) = uVal;
+        off      += 4;
+        cchAlign -= 4;
+        offBuf   -= 4;
+    }
+
+    if (offBuf)
+    {
+        uint32_t uVal = 0;
+        switch (offBuf)
+        {
+            case 3:
+                uVal = '\n' << 24 | pachBuf[offBuf - 3] << 16 | pachBuf[offBuf - 2] << 8 | pachBuf[offBuf - 1];
+                break;
+            case 2:
+                uVal = '\n' << 24 | '\n' << 16 | pachBuf[offBuf - 2] << 8 | pachBuf[offBuf - 1];
+                break;
+            case 1:
+                uVal = '\n' << 24 | '\n' << 16 | '\n' << 8 | pachBuf[offBuf - 1];
+            default:
+                break;
+        }
+
+        *(volatile uint32_t *)(0x01aab000 + off) = uVal;
+        off   += 4;
+    }
+#endif
 }
 
 static void svcTraceAppendStringN(const char *pszStr, size_t cchStr)
 {
+#ifndef PSP_SPI_LOG_SIMPLE
     size_t cchAlign = cchStr & ~(uint32_t)0x1;
     size_t cchRem = cchStr - cchAlign;
 
@@ -247,6 +290,40 @@ static void svcTraceAppendStringN(const char *pszStr, size_t cchStr)
         default:
             do { } while (1);
     }
+#else
+    size_t cchAlign = cchStr & ~(uint32_t)0x3;
+    size_t cchRem = cchStr - cchAlign;
+
+
+    while (cchAlign >= 4)
+    {
+        *(volatile uint32_t *)(0x01aab000 + off) = *(uint32_t *)pszStr;
+        off      += 4;
+        cchAlign -= 4;
+        pszStr   += 4;
+    }
+
+    if (cchRem)
+    {
+        uint32_t uVal = 0;
+        switch (cchRem)
+        {
+            case 3:
+                uVal = '\n' << 24 | pszStr[2] << 16 | pszStr[1] << 8 | pszStr[0];
+                break;
+            case 2:
+                uVal = '\n' << 24 | '\n' << 16 | pszStr[1] << 8 | pszStr[0];
+                break;
+            case 1:
+                uVal = '\n' << 24 | '\n' << 16 | '\n' << 8 | pszStr[0];
+            default:
+                break;
+        }
+
+        *(volatile uint32_t *)(0x01aab000 + off) = uVal;
+        off   += 4;
+    }
+#endif
 }
 
 static void svcTraceAppendString(const char *pszStr)
@@ -888,6 +965,44 @@ uint32_t svc_trace_intercept(uint32_t idxSyscall, PPSPREGFRAME pRegs)
             }
             break;
         }
+        case SVC_X86_HOST_COPY_TO_PSP:
+        {
+            uint32_t *pReq = (uint32_t *)pRegs->auGprs[0];
+            uint8_t  bVal = *(uint8_t *)pReq[2];
+            svcTraceDumpLogMarker();
+            svcTraceAppendString("x86Read: ");
+            svcTraceAppendHexU32(pReq[0]);
+            svcTraceAppendString(" ");
+            svcTraceAppendHexU32(pReq[2]);
+            svcTraceAppendString(" ");
+            svcTraceAppendHexU32(bVal);
+            svcTraceAppendString(" ");
+            svcTraceAppendHexU32(pReq[3]);
+            svcTraceAppendString(" ");
+            svcTraceAppendHexU32(pReq[4]);
+            svcTraceAppendString("\n");
+            svcTraceDumpLogMarker();
+            break;
+        }
+        case SVC_X86_HOST_COPY_FROM_PSP:
+        {
+            uint32_t *pReq = (uint32_t *)pRegs->auGprs[0];
+            uint8_t  bVal = *(uint8_t *)pReq[2];
+            svcTraceDumpLogMarker();
+            svcTraceAppendString("x86Write: ");
+            svcTraceAppendHexU32(pReq[0]);
+            svcTraceAppendString(" ");
+            svcTraceAppendHexU32(pReq[2]);
+            svcTraceAppendString(" ");
+            svcTraceAppendHexU32(bVal);
+            svcTraceAppendString(" ");
+            svcTraceAppendHexU32(pReq[3]);
+            svcTraceAppendString(" ");
+            svcTraceAppendHexU32(pReq[4]);
+            svcTraceAppendString("\n");
+            svcTraceDumpLogMarker();
+            break;
+        }
     }
 
     svcTraceExit(idxSyscall, pRegs, u32Ret);
@@ -897,6 +1012,7 @@ uint32_t svc_trace_intercept(uint32_t idxSyscall, PPSPREGFRAME pRegs)
 
 void svc_trap_handler(uint32_t *pau32Info)
 {
+    svcTraceDumpPspDetectionMarkers();
     svcTraceDumpLogMarker();
     svcTraceAppendString("TRAP: ");
     for (uint32_t i = 0; i < 18; i++)
@@ -931,6 +1047,7 @@ int svc_inject_handler(uint32_t idxSyscall, PPSPREGFRAME pRegs, uint32_t *prcHnd
          * can find the PSP.
          */
         g_uCpuId = get_cpu_id();
+        svcTraceDumpPspDetectionMarkers();
         g_fSvcTraceArm = 0;
         *(volatile uint32_t *)PSP_FW_SVC_HANDLER_PATCH_ADDR = (uint32_t)((uintptr_t)svc_trace_intercept) | 1;
         *(volatile uint32_t *)PSP_FW_TRAP_HANDLER_PATCH_ADDR = (uint32_t)((uintptr_t)svc_trap_handler) | 1;
@@ -964,7 +1081,11 @@ int svc_inject_handler(uint32_t idxSyscall, PPSPREGFRAME pRegs, uint32_t *prcHnd
  */
 static uint32_t get_cpu_id()
 {
+#if 1
+    return *(volatile uint32_t *)0x300000C;
+#else
     return *(uint32_t *)PSP_CCX_ID_ADDR;
+#endif
 }
 
 static int strncmp(const char *psz1, const char *psz2, uint32_t cch)
