@@ -32,8 +32,50 @@
 #include <psp-stub/psp-serial-stub.h>
 
 
+/** Use the SPI message channel instead of the UART. */
+#define PSP_SERIAL_STUB_SPI_MSG_CHAN    1
+
 /** Indefinite wait. */
 #define PSP_SERIAL_STUB_INDEFINITE_WAIT 0xffffffff
+
+
+/**
+ * A ring buffer header for the SPI message channel.
+ */
+typedef struct SPIRINGBUF
+{
+    /** Size of the ring buffer. */
+    uint32_t                        cbRingBuf;
+    /** The head counter (producer). */
+    uint32_t                        offHead;
+    /** The tail counter (consumer). */
+    uint32_t                        offTail;
+} SPIRINGBUF;
+/** Pointer to a ring buffer header. */
+typedef struct SPIRINGBUF *PSPIRINGBUF;
+
+
+/**
+ * The SPI message channel header.
+ */
+typedef struct SPIMSGCHANHDR
+{
+    /** Offset where the EXT -> PSP ring buffer is located (from the beginning of the message channel). */
+    uint32_t                        offExt2PspBuf;
+    /** Offset where the PSP -> EXT ring buffer is located (from the beginning of the message channel). */
+    uint32_t                        offPsp2ExtBuf;
+    /** The EXT -> PSP ring buffer header. */
+    SPIRINGBUF                      Ext2PspRingBuf;
+    /** The PSP -> EXT ring buffer header. */
+    SPIRINGBUF                      Psp2ExtRingBuf;
+    /** The message channel header magic, must be last. */
+    uint32_t                        u32Magic;
+} SPIMSGCHANHDR;
+
+/** Where in the flash the message channel is located. */
+#define SPI_MSG_CHAN_HDR_OFF   0xaab000
+/** The magic vaue to identify the message channel header (J. R. R. Tolkien). */
+#define SPI_MSG_CHAN_HDR_MAGIC 0x18920103
 
 
 /**
@@ -133,10 +175,28 @@ typedef struct PSPSTUBSTATE
     PSPTIMER                    Timer;
     /** The timekeeping manager used. */
     PTM                         pTm;
-    /** x86 UART device instance. */
-    PSPX86UART                  X86Uart;
-    /** UART device instance. */
-    PSPUART                     Uart;
+    /** Flag whether the SPI message channel is used over the UART as the data transport. */
+    bool                        fSpiMsgChan;
+    /** Data transport method dependent data. */
+    union
+    {
+        /** UART transport mechanism. */
+        struct
+        {
+            /** x86 UART device instance. */
+            PSPX86UART          X86Uart;
+            /** UART device instance. */
+            PSPUART             Uart;
+        } Uart;
+        /** SPI message channel transport mechanism. */
+        struct
+        {
+            /** The SMN mapping for the flash region where the message channel is located. */
+            void                *pvMap;
+            /** The message channel header which is constantly updated. */
+            SPIMSGCHANHDR       MsgChanHdr;
+        } Spi;
+    } Transp;
     /** x86 mapping bookkeeping data. */
     PSPX86MAPPING               aX86MapSlots[15];
     /** SMN mapping bookkeeping data. */
@@ -145,6 +205,10 @@ typedef struct PSPSTUBSTATE
     uint32_t                    cCcds;
     /** Flag whether someone is connected. */
     bool                        fConnected;
+    /** Flag whether we are in the early logging over SPI phase. */
+    bool                        fEarlyLogOverSpi;
+    /** Flag whether logging is enabled at all currently. */
+    bool                        fLogEnabled;
     /** Number of beacons sent. */
     uint32_t                    cBeaconsSent;
     /** Number of PDUs sent so far. */
@@ -167,6 +231,7 @@ typedef PSPSTUBSTATE *PPSPSTUBSTATE;
 
 /** The global stub state. */
 static PSPSTUBSTATE g_StubState;
+static uint32_t off = 0;
 
 
 /**
@@ -189,7 +254,7 @@ static int pspStubX86PhysMap(PPSPSTUBSTATE pThis, X86PADDR PhysX86Addr, bool fMm
 
     PPSPX86MAPPING pMapping = NULL;
     uint32_t idxSlot = 0;
-    for (uint32_t i = 0; i < ELEMENTS(pThis->aX86MapSlots); i++)
+    for (uint32_t i = fMmio ? 8 : 0; i < ELEMENTS(pThis->aX86MapSlots); i++)
     {
         if (   (   pThis->aX86MapSlots[i].PhysX86AddrBase == NIL_X86PADDR
                 && pThis->aX86MapSlots[i].cRefs == 0)
@@ -218,8 +283,10 @@ static int pspStubX86PhysMap(PPSPSTUBSTATE pThis, X86PADDR PhysX86Addr, bool fMm
             *(volatile uint32_t *)(PspAddrSlotBase + 12) = uMemType;
             *(volatile uint32_t *)(0x032303e0 + idxSlot * sizeof(uint32_t)) = 0xffffffff;
             *(volatile uint32_t *)(0x032304d8 + idxSlot * sizeof(uint32_t)) = 0xc0000000;
+            *(volatile uint32_t *)0x32305ec = 0x3333;
         }
 
+        asm volatile("dsb #0xf\nisb #0xf\n": : :"memory");
         pMapping->cRefs++;
         *ppv = (void *)(0x04000000 + idxSlot * _64M + offStart);
     }
@@ -249,6 +316,7 @@ static int pspStubX86PhysUnmapByPtr(PPSPSTUBSTATE pThis, void *pv)
     {
         PPSPX86MAPPING pMapping = &pThis->aX86MapSlots[idxSlot];
 
+        asm volatile("dsb #0xf\nisb #0xf\n": : :"memory");
         if (pMapping->cRefs > 0)
         {
             pMapping->cRefs--;
@@ -279,14 +347,14 @@ static int pspStubX86PhysUnmapByPtr(PPSPSTUBSTATE pThis, void *pv)
 
 
 /**
- * Maps the given x86 physical address into the PSP address space.
+ * Maps the given SMN address into the PSP address space.
  *
  * @returns Status code.
  * @param   pThis                   The serial stub instance data.
  * @param   SmnAddr                 The SMN address to map.
  * @param   ppv                     Where to store the pointer to the mapping on success.
  */
-static int pspStubSmnPhysMap(PPSPSTUBSTATE pThis, SMNADDR SmnAddr, void **ppv)
+static int pspStubSmnMap(PPSPSTUBSTATE pThis, SMNADDR SmnAddr, void **ppv)
 {
     int rc = INF_SUCCESS;
 
@@ -331,6 +399,7 @@ static int pspStubSmnPhysMap(PPSPSTUBSTATE pThis, SMNADDR SmnAddr, void **ppv)
     else
         rc = ERR_INVALID_STATE;
 
+    LogRel("pspStubSmnUnmapByPtr: SmnAddr=%#x -> rc=%d,pv=%p\n", SmnAddr, rc, *ppv);
     return rc;
 }
 
@@ -378,6 +447,7 @@ static int pspStubSmnUnmapByPtr(PPSPSTUBSTATE pThis, void *pv)
     else
         rc = ERR_INVALID_PARAMETER;
 
+    LogRel("pspStubSmnUnmapByPtr: pv=%p -> rc=%d\n", pv, rc);
     return rc;
 }
 
@@ -456,10 +526,11 @@ static void pspStubTimerHandle(PPSPTIMER pTimer)
      *
      * 10ns granularity means 100 ticks per us -> 100 * 1000 ticks per ms.
      */
-    while (cTicksPassed >= 100 * 1000)
+    if (cTicksPassed >= 100 * 1000)
     {
-        TMTick(&pTimer->Tm);
-        cTicksPassed -= 100 * 1000;
+        uint32_t cMsPassed = cTicksPassed / (100 * 1000);
+        TMTickMultiple(&pTimer->Tm, cMsPassed);
+        cTicksPassed -= cMsPassed * (100 * 1000);
     }
 
     /* Check whether the remaining ticks added to the accumulated ones exceed 1ms. */
@@ -471,6 +542,7 @@ static void pspStubTimerHandle(PPSPTIMER pTimer)
     }
 
     pTimer->cSubMsTicks = cTicksPassed;
+    pTimer->cCnts       = cCnts;
 }
 
 
@@ -496,6 +568,359 @@ static uint32_t pspStubTimerGetMillies(PPSPTIMER pTimer)
 static inline uint32_t pspStubGetMillies(PPSPSTUBSTATE pThis)
 {
     return pspStubTimerGetMillies(&pThis->Timer);
+}
+
+
+/**
+ * Wait the given number of milli seconds.
+ *
+ * @returns nothing.
+ * @param   pThis                   The serial stub instance data.
+ * @param   cMillies                Number of milli seconds to wait.
+ */
+static void pspStubDelayMs(PPSPSTUBSTATE pThis, uint32_t cMillies)
+{
+    uint32_t tsStart = pspStubGetMillies(pThis);
+    while (pspStubGetMillies(pThis) <= tsStart + cMillies);
+}
+
+
+/**
+ * Reads the given amount of data from the SPI flash.
+ *
+ * @returns Nothing.
+ * @param   pThis                   The serial stub instance data.
+ * @param   off                     Start offset to read from.
+ * @param   pvBuf                   Where to store the read data.
+ * @param   cbRead                  How many bytes to read.
+ */
+static void pspStubTranspSpiFlashRead(PPSPSTUBSTATE pThis, uint32_t off, void *pvBuf, size_t cbRead)
+{
+    memcpy(pvBuf, (uint8_t *)pThis->Transp.Spi.pvMap + off, cbRead);
+}
+
+
+/**
+ * Writes the given amount of data to the SPI flash.
+ *
+ * @returns Nothing.
+ * @param   pThis                   The serial stub instance data.
+ * @param   off                     Start offset to write to.
+ * @param   pvBuf                   The data to write.
+ * @param   cbWrite                 How many bytes to write.
+ */
+static void pspStubTranspSpiFlashWrite(PPSPSTUBSTATE pThis, uint32_t off, const void *pvBuf, size_t cbWrite)
+{
+    memcpy((uint8_t *)pThis->Transp.Spi.pvMap + off, pvBuf, cbWrite);
+}
+
+
+/**
+ * Fetches a new version of the SPI message buffer header.
+ *
+ * @returns nothing.
+ * @param   pThis                   The serial stub instance data.
+ */
+static void pspStubTranspSpiMsgBufferHdrFetch(PPSPSTUBSTATE pThis)
+{
+    pspStubTranspSpiFlashRead(pThis, 0, &pThis->Transp.Spi.MsgChanHdr, sizeof(pThis->Transp.Spi.MsgChanHdr));
+}
+
+
+/**
+ * Returns the amount of free bytes in the ring buffer.
+ *
+ * @returns Number of bytes free in the ring buffer.
+ * @param   pRingBuf                The ring buffer.
+ */
+static size_t pspStubTranspSpiMsgBufferGetFree(PSPIRINGBUF pRingBuf)
+{
+    if (pRingBuf->offHead >= pRingBuf->offTail)
+        return pRingBuf->cbRingBuf - (pRingBuf->offHead - pRingBuf->offTail);
+
+    /* Wrap around. */
+    return pRingBuf->offTail - pRingBuf->offHead;
+}
+
+
+/**
+ * Returns the amount of used bytes in the ring buffer.
+ *
+ * @returns Number of bytes used in the ring buffer.
+ * @param   pRingBuf                The ring buffer.
+ */
+static size_t pspStubTranspSpiMsgBufferGetUsed(PSPIRINGBUF pRingBuf)
+{
+    return pRingBuf->cbRingBuf - pspStubTranspSpiMsgBufferGetFree(pRingBuf);
+}
+
+
+/**
+ * Returns the amount of bytes which can be written in one go, i.e. until the
+ * buffer is full or a head pointer wraparound occurs.
+ *
+ * @returns Number of bytes which can be written in one go.
+ * @param   pRingBuf                The ring buffer.
+ */
+static size_t pspStubTranspSpiMsgBufferGetWrite(PSPIRINGBUF pRingBuf)
+{
+    size_t cbFree = pspStubTranspSpiMsgBufferGetFree(pRingBuf);
+    return MIN(cbFree, pRingBuf->cbRingBuf - pRingBuf->offHead);
+}
+
+
+/**
+ * Returns the amount of bytes which can be read in one go, i.e. until the
+ * buffer is full or a tail pointer wraparound occurs.
+ *
+ * @returns Number of bytes which can be read in one go.
+ * @param   pRingBuf                The ring buffer.
+ */
+static size_t pspStubTranspSpiMsgBufferGetRead(PSPIRINGBUF pRingBuf)
+{
+    size_t cbUsed = pspStubTranspSpiMsgBufferGetUsed(pRingBuf);
+    return MIN(cbUsed, pRingBuf->cbRingBuf - pRingBuf->offTail);
+}
+
+
+/**
+ * Advances the write pointer of the given ring buffer.
+ *
+ * @returns nothing.
+ * @param   pRingBuf                The ring buffer.
+ * @param   cbWrite                 Amount of bytes to advance the head pointer.
+ */
+static void pspStubTranspSpiMsgBufferWriteAdv(PSPIRINGBUF pRingBuf, size_t cbWrite)
+{
+    pRingBuf->offHead += cbWrite;
+    pRingBuf->offHead %= pRingBuf->cbRingBuf;
+}
+
+
+/**
+ * Advances the read pointer of the given ring buffer.
+ *
+ * @returns nothing.
+ * @param   pRingBuf                The ring buffer.
+ * @param   cbRead                  Amount of bytes to advance the tail pointer.
+ */
+static void pspStubTranspSpiMsgBufferReadAdv(PSPIRINGBUF pRingBuf, size_t cbRead)
+{
+    pRingBuf->offTail += cbRead;
+    pRingBuf->offTail %= pRingBuf->cbRingBuf;
+}
+
+
+/**
+ * Writes into the SPI message buffer.
+ *
+ * @returns Status code.
+ * @param   pThis                   The serial stub instance data.
+ * @param   pvBuf                   The data to write.
+ * @param   cbWrite                 Number of bytes to write.
+ */
+static int pspStubTranspSpiMsgBufferWrite(PPSPSTUBSTATE pThis, const void *pvBuf, size_t cbWrite)
+{
+    uint8_t *pbBuf = (uint8_t *)pvBuf;
+    size_t cbWriteLeft = cbWrite;
+
+    do
+    {
+        pspStubTranspSpiMsgBufferHdrFetch(pThis);
+
+        /* Check whether we have room to write the data into the ring buffer. */
+        size_t cbThisWrite = MIN(cbWriteLeft,
+                                 pspStubTranspSpiMsgBufferGetWrite(&pThis->Transp.Spi.MsgChanHdr.Psp2ExtRingBuf));
+        if (cbThisWrite)
+        {
+            /* Write the data. */
+            size_t offSpiFlashWrite =   pThis->Transp.Spi.MsgChanHdr.offPsp2ExtBuf            /* Relative offset where the data area of the ring buffer starts. */
+                                      + pThis->Transp.Spi.MsgChanHdr.Psp2ExtRingBuf.offHead;  /* Offset into the data area to write. */
+            pspStubTranspSpiFlashWrite(pThis, offSpiFlashWrite, pbBuf, cbThisWrite);
+
+            pbBuf       += cbThisWrite;
+            cbWriteLeft -= cbThisWrite;
+            pspStubTranspSpiMsgBufferWriteAdv(&pThis->Transp.Spi.MsgChanHdr.Psp2ExtRingBuf, cbThisWrite);
+            /* Update the pointer in flash. */
+            pspStubTranspSpiFlashWrite(pThis, __builtin_offsetof(SPIMSGCHANHDR, Psp2ExtRingBuf.offHead),
+                                       &pThis->Transp.Spi.MsgChanHdr.Psp2ExtRingBuf.offHead,
+                                       sizeof(pThis->Transp.Spi.MsgChanHdr.Psp2ExtRingBuf.offHead));
+        }
+    } while (cbWriteLeft);
+
+    return 0;
+}
+
+
+/**
+ * Reads from the SPI message buffer.
+ *
+ * @returns Status code.
+ * @param   pThis                   The serial stub instance data.
+ * @param   pvBuf                   Where to store the read data.
+ * @param   cbRead                  Number of bytes to read.
+ */
+static int pspStubTranspSpiMsgBufferRead(PPSPSTUBSTATE pThis, void *pvBuf, size_t cbRead)
+{
+    uint8_t *pbBuf = (uint8_t *)pvBuf;
+    size_t cbReadLeft = cbRead;
+
+    do
+    {
+        pspStubTranspSpiMsgBufferHdrFetch(pThis);
+
+        /* Check whether we have room to write the data into the ring buffer. */
+        size_t cbThisRead = MIN(cbReadLeft,
+                                pspStubTranspSpiMsgBufferGetRead(&pThis->Transp.Spi.MsgChanHdr.Ext2PspRingBuf));
+        if (cbThisRead)
+        {
+            /* Write the data. */
+            size_t offSpiFlashRead =   pThis->Transp.Spi.MsgChanHdr.offExt2PspBuf            /* Relative offset where the data area of the ring buffer starts. */
+                                     + pThis->Transp.Spi.MsgChanHdr.Ext2PspRingBuf.offTail;  /* Offset into the data area to read. */
+            pspStubTranspSpiFlashRead(pThis, offSpiFlashRead, pbBuf, cbThisRead);
+
+            pbBuf      += cbThisRead;
+            cbReadLeft -= cbThisRead;
+            pspStubTranspSpiMsgBufferReadAdv(&pThis->Transp.Spi.MsgChanHdr.Ext2PspRingBuf, cbThisRead);
+            /* Update the pointer in flash. */
+            pspStubTranspSpiFlashWrite(pThis, __builtin_offsetof(SPIMSGCHANHDR, Ext2PspRingBuf.offTail),
+                                       &pThis->Transp.Spi.MsgChanHdr.Ext2PspRingBuf.offTail,
+                                       sizeof(pThis->Transp.Spi.MsgChanHdr.Ext2PspRingBuf.offTail));
+        }
+    } while (cbReadLeft);
+
+    return 0;
+}
+
+
+/**
+ * Checks how many bytes are available for reading in the message buffer.
+ *
+ * @returns Number of bytes available for reading.
+ * @param   pThis                   The serial stub instance data.
+ */
+static size_t pspStubTranspSpiMsgBufferPeek(PPSPSTUBSTATE pThis)
+{
+    pspStubTranspSpiMsgBufferHdrFetch(pThis);
+    return pspStubTranspSpiMsgBufferGetUsed(&pThis->Transp.Spi.MsgChanHdr.Ext2PspRingBuf);
+}
+
+
+/**
+ * Initializes the selected transport channel.
+ *
+ * @returns Status code.
+ * @param   pThis                   The serial stub instance data.
+ */
+static int pspStubTranspInit(PPSPSTUBSTATE pThis)
+{
+    int rc = 0;
+
+    if (pThis->fSpiMsgChan)
+    {
+        /* Map the SMN region. */
+        rc = pspStubSmnMap(pThis, 0x0a000000 + SPI_MSG_CHAN_HDR_OFF, &pThis->Transp.Spi.pvMap);
+        if (!rc)
+        {
+            /* Wait until we see a valid channel header. */
+            for (;;)
+            {
+                pspStubTranspSpiMsgBufferHdrFetch(pThis);
+
+                /* Verify the header. */
+                if (pThis->Transp.Spi.MsgChanHdr.u32Magic == SPI_MSG_CHAN_HDR_MAGIC)
+                    break;
+            }
+        }
+    }
+    else
+    {
+        pThis->Transp.Uart.X86Uart.PhysX86UartBase     = 0xfffdfc0003f8;
+        pThis->Transp.Uart.X86Uart.pvUart              = NULL;
+        pThis->Transp.Uart.X86Uart.IfIoDev.pfnRegRead  = pspStubX86UartRegRead;
+        pThis->Transp.Uart.X86Uart.IfIoDev.pfnRegWrite = pspStubX86UartRegWrite;
+
+        rc = pspStubX86PhysMap(pThis, pThis->Transp.Uart.X86Uart.PhysX86UartBase, true /*fMmio*/, (void **)&pThis->Transp.Uart.X86Uart.pvUart);
+        if (!rc)
+        {
+            LogRel("pspStubTranspInit: Mapped x86 UART at %p\n", pThis->Transp.Uart.X86Uart.pvUart);
+            rc = PSPUartCreate(&pThis->Transp.Uart.Uart, &pThis->Transp.Uart.X86Uart.IfIoDev);
+            if (!rc)
+            {
+                LogRel("pspStubTranspInit: Successfully created instantiated UART device\n");
+                rc = PSPUartParamsSet(&pThis->Transp.Uart.Uart, 115200, PSPUARTDATABITS_8BITS, PSPUARTPARITY_NONE, PSPUARTSTOPBITS_1BIT);
+                if (rc)
+                    LogRel("pspStubTranspInit: UART configuration failed with %d\n", rc);
+            }
+            else
+                LogRel("pspStubTranspInit: UART instantiation failed with %d\n", rc);
+        }
+        else
+            LogRel("pspStubTranspInit: Mapping x86 UART failed with %d\n", rc);
+    }
+
+    return rc;
+}
+
+
+/**
+ * Returns the number of bytes available for reading.
+ *
+ * @returns Number of bytes available for reading.
+ * @param   pThis                   The serial stub instance data.
+ */
+static size_t pspStubTranspPeek(PPSPSTUBSTATE pThis)
+{
+    size_t cbAvail = 0;
+
+    if (pThis->fSpiMsgChan)
+        cbAvail = pspStubTranspSpiMsgBufferPeek(pThis);
+    else
+        cbAvail = PSPUartGetDataAvail(&pThis->Transp.Uart.Uart);
+
+    return cbAvail;
+}
+
+
+/**
+ * Writes the given data to the underyling transport channel.
+ *
+ * @returns Status code.
+ * @param   pThis                   The serial stub instance data.
+ * @param   pvBuf                   The data to write.
+ * @param   cbWrite                 Number of bytes to write.
+ */
+static int pspStubTranspWrite(PPSPSTUBSTATE pThis, const void *pvBuf, size_t cbWrite)
+{
+    int rc = 0;
+
+    if (pThis->fSpiMsgChan)
+        rc = pspStubTranspSpiMsgBufferWrite(pThis, pvBuf, cbWrite);
+    else
+        rc = PSPUartWrite(&pThis->Transp.Uart.Uart, pvBuf, cbWrite, NULL /*pcbWritten*/);
+
+    return rc;
+}
+
+
+/**
+ * Reads data from the underyling transport channel.
+ *
+ * @returns Status code.
+ * @param   pThis                   The serial stub instance data.
+ * @param   pvBuf                   Where to store the read data.
+ * @param   cbRead                  Number of bytes to read.
+ */
+static int pspStubTranspRead(PPSPSTUBSTATE pThis, void *pvBuf, size_t cbRead)
+{
+    int rc = 0;
+
+    if (pThis->fSpiMsgChan)
+        rc = pspStubTranspSpiMsgBufferRead(pThis, pvBuf, cbRead);
+    else
+        rc = PSPUartRead(&pThis->Transp.Uart.Uart, pvBuf, cbRead, NULL /*pcbRead*/);
+
+    return rc;
 }
 
 
@@ -536,11 +961,11 @@ static int pspStubPduSend(PPSPSTUBSTATE pThis, int32_t rcReq, uint32_t idCcd, PS
     PduFooter.u32Magic  = PSP_SERIAL_PSP_2_EXT_PDU_END_MAGIC;
 
     /* Send everything, header first, then payload and footer last. */
-    int rc = PSPUartWrite(&pThis->Uart, &PduHdr, sizeof(PduHdr), NULL /*pcbWritten*/);
+    int rc = pspStubTranspWrite(pThis, &PduHdr, sizeof(PduHdr));
     if (!rc && pvPayload && cbPayload)
-        rc = PSPUartWrite(&pThis->Uart, pvPayload, cbPayload, NULL /*pcbWritten*/);
+        rc = pspStubTranspWrite(pThis, pvPayload, cbPayload);
     if (!rc)
-        rc = PSPUartWrite(&pThis->Uart, &PduFooter, sizeof(PduFooter), NULL /*pcbWritten*/);
+        rc = pspStubTranspWrite(pThis, &PduFooter, sizeof(PduFooter));
 
     return rc;
 }
@@ -606,7 +1031,7 @@ static int pspStubPduValidate(PPSPSTUBSTATE pThis, PCPSPSERIALPDUHDR pHdr)
     /* Check whether the footer magic and checksum are valid. */
     PCPSPSERIALPDUFOOTER pFooter = (PCPSPSERIALPDUFOOTER)pbPayload;
     if (   uChkSum + pFooter->u32ChkSum != 0
-        || pFooter->u32Magic == PSP_SERIAL_EXT_2_PSP_PDU_END_MAGIC)
+        || pFooter->u32Magic != PSP_SERIAL_EXT_2_PSP_PDU_END_MAGIC)
         return -1;
 
     return 0;
@@ -623,6 +1048,8 @@ static int pspStubPduValidate(PPSPSTUBSTATE pThis, PCPSPSERIALPDUHDR pHdr)
 static int pspStubPduRecvAdvance(PPSPSTUBSTATE pThis, PCPSPSERIALPDUHDR *ppPduRcvd)
 {
     int rc = INF_SUCCESS;
+
+    *ppPduRcvd = NULL;
 
     switch (pThis->enmPduRecvState)
     {
@@ -699,14 +1126,14 @@ static int pspStubPduRecv(PPSPSTUBSTATE pThis, PCPSPSERIALPDUHDR *ppPduRcvd, uin
 
     do
     {
-        size_t cbAvail = PSPUartGetDataAvail(&pThis->Uart);
+        size_t cbAvail = pspStubTranspPeek(pThis);
         if (cbAvail)
         {
             /* Only read what is required for the current state. */
             /** @todo If the connection turns out to be unreliable we have to do a marker search first. */
             size_t cbThisRecv = MIN(cbAvail, pThis->cbPduRecvLeft);
 
-            rc = PSPUartRead(&pThis->Uart, &pThis->abPdu[pThis->offPduRecv], cbThisRecv, NULL /*pcbRead*/);
+            rc = pspStubTranspRead(pThis, &pThis->abPdu[pThis->offPduRecv], cbThisRecv);
             if (!rc)
             {
                 pThis->offPduRecv    += cbThisRecv;
@@ -723,10 +1150,12 @@ static int pspStubPduRecv(PPSPSTUBSTATE pThis, PCPSPSERIALPDUHDR *ppPduRcvd, uin
             }
         }
     } while (   !rc
-             &&    (pspStubGetMillies(pThis) - tsStartMs < cMillies)
+             &&  (pspStubGetMillies(pThis) - tsStartMs < cMillies)
                 || (cMillies == PSP_SERIAL_STUB_INDEFINITE_WAIT));
 
-    if (tsStartMs + pspStubGetMillies(pThis) >= cMillies)
+    if (   !rc
+        && !*ppPduRcvd
+        && tsStartMs + pspStubGetMillies(pThis) >= cMillies)
         rc = INF_TRY_AGAIN;
 
     return rc;
@@ -873,14 +1302,14 @@ static int pspStubPduProcessPspMmioXfer(PPSPSTUBSTATE pThis, const void *pvPaylo
     void *pvDst = NULL;
     if (fWrite)
     {
-        enmResponse = PSPSERIALPDURRNID_RESPONSE_PSP_MEM_WRITE;
+        enmResponse = PSPSERIALPDURRNID_RESPONSE_PSP_MMIO_WRITE;
         pvDst = (void *)(uintptr_t)pReq->PspAddrStart;
         pvSrc = (pReq + 1);
         pspStubMmioAccess(pvDst, (pReq + 1), cbXfer);
     }
     else
     {
-        enmResponse   = PSPSERIALPDURRNID_RESPONSE_PSP_MEM_READ;
+        enmResponse   = PSPSERIALPDURRNID_RESPONSE_PSP_MMIO_READ;
         pvSrc = (void *)(uintptr_t)pReq->PspAddrStart;
         pvDst = &abRead[0];
         pspStubMmioAccess(&abRead[0], pvSrc, cbXfer);
@@ -916,7 +1345,7 @@ static int pspStubPduProcessPspSmnXfer(PPSPSTUBSTATE pThis, const void *pvPayloa
                                     ? PSPSERIALPDURRNID_RESPONSE_PSP_SMN_WRITE
                                     : PSPSERIALPDURRNID_RESPONSE_PSP_SMN_READ;
     void *pvMap = NULL;
-    int rc = pspStubSmnPhysMap(pThis, pReq->SmnAddrStart, &pvMap);
+    int rc = pspStubSmnMap(pThis, pReq->SmnAddrStart, &pvMap);
     if (!rc)
     {
         const void *pvRespPayload = NULL;
@@ -1093,6 +1522,195 @@ static int pspStubPduProcess(PPSPSTUBSTATE pThis, PCPSPSERIALPDUHDR pPdu)
 }
 
 
+static void pspStubMmioWrU32(PSPADDR PspAddrMmio, uint32_t uVal)
+{
+    pspStubMmioAccess((void *)PspAddrMmio, &uVal, sizeof(uint32_t));
+}
+
+
+static void pspStubMmioSetU32(PSPADDR PspAddrMmio, uint32_t fSet)
+{
+    uint32_t uVal;
+    pspStubMmioAccess(&uVal, (void *)PspAddrMmio, sizeof(uint32_t));
+    LogRel("pspStubMmioSetU32: PspAddrMmio=%#x fSet=%#x uVal=%#x\n",
+           PspAddrMmio, fSet, uVal);
+    uVal |= fSet;
+    pspStubMmioAccess((void *)PspAddrMmio, &uVal, sizeof(uint32_t));
+}
+
+
+static void pspStubMmioClearU32(PSPADDR PspAddrMmio, uint32_t fClr)
+{
+    uint32_t uVal;
+    pspStubMmioAccess(&uVal, (void *)PspAddrMmio, sizeof(uint32_t));
+    LogRel("pspStubMmioClearU32: PspAddrMmio=%#x fClr=%#x uVal=%#x\n",
+           PspAddrMmio, fClr, uVal);
+    uVal &= ~fClr;
+    pspStubMmioAccess((void *)PspAddrMmio, &uVal, sizeof(uint32_t));
+}
+
+
+static void pspStubMmioWaitOnClrU32(PSPADDR PspAddrMmio, uint32_t fWait)
+{
+    uint32_t uVal = 0;
+
+    do
+    {
+        pspStubMmioAccess(&uVal, (void *)PspAddrMmio, sizeof(uint32_t));
+    } while (uVal & fWait != 0);
+}
+
+
+static void pspStubSmnSetU32(PPSPSTUBSTATE pThis, SMNADDR SmnAddr, uint32_t fSet)
+{
+    void *pvMap = NULL;
+    int rc = pspStubSmnMap(pThis, SmnAddr, &pvMap);
+    if (!rc)
+    {
+        pspStubMmioSetU32((PSPADDR)pvMap, fSet);
+        pspStubSmnUnmapByPtr(pThis, pvMap);
+    }
+}
+
+
+static void pspStubSmnAndOrU32(PPSPSTUBSTATE pThis, SMNADDR SmnAddr, uint32_t fAnd, uint32_t fOr)
+{
+    void *pvMap = NULL;
+    int rc = pspStubSmnMap(pThis, SmnAddr, &pvMap);
+    if (!rc)
+    {
+        uint32_t uVal;
+        pspStubMmioAccess(&uVal, (void *)pvMap, sizeof(uint32_t));
+        uint32_t uValNew = (uVal & fAnd) | fOr;
+        LogRel("pspStubSmnAndOrU32: SmnAddr=%#x fAnd=%#x fOr=%#x uVal=%#x uValNew=%#x\n",
+               SmnAddr, fAnd, fOr, uVal, uValNew);
+        pspStubMmioAccess((void *)pvMap, &uValNew, sizeof(uint32_t));
+        pspStubSmnUnmapByPtr(pThis, pvMap);
+    }
+}
+
+
+static SMNADDR s_aSmnAddrSet[] =
+{
+    0x2f00404,
+    0x2f00c04,
+    0x2f01004,
+    0x2f01404,
+    0x2f01804,
+    0x2f01c04,
+    0x2f02804,
+    0x2f03404,
+    0x2f04c04,
+    0x2f05004,
+    0x2f06004,
+    0x2f07004,
+    0x2f09004,
+    0x2f09404,
+    0x2f09c04,
+    0x2f0b404,
+    0x2f0b804,
+    0x2f0c004,
+    0x2f0c404,
+    0x2f0c804,
+    0x2f0cc04,
+    0x2f0d004,
+    0x2f0d404,
+    0x2f10804,
+    0x2f11804,
+    0x2f11c04,
+    0x2f14004,
+    0x2f14404,
+    0x2f14804,
+    0x2f14c04,
+    0x2f15004,
+    0x2f15404,
+    0x2f15804,
+    0x2f15c04,
+    0x2f16804,
+    0x2f16c04,
+    0x2f19004,
+    0x2f1b004,
+    0x2f1b404,
+    0x2f1b804,
+    0x2f1f004,
+    0x2f20004,
+    0x2f20404,
+    0x2f24004,
+    0x2f25804,
+    0x2f25c04,
+    0x2f2a004,
+    0x2f2a804,
+    0x2f2c004,
+    0x2f2c404,
+    0x2f36004,
+    0x2f38004,
+    0x2f38404,
+    0x2f38804,
+    0x2f38c04,
+    0x2f39004,
+    0x2f39404,
+    0x2f39804,
+    0x2f3fc04
+};
+
+static void pspStubInitHwUnkSmnRanges(PPSPSTUBSTATE pThis)
+{
+    for (uint32_t i = 0; i < ELEMENTS(s_aSmnAddrSet); i++)
+        pspStubSmnAndOrU32(pThis, s_aSmnAddrSet[i], 0xffffffff, 0x4);
+}
+
+
+static void pspStubInitHw(PPSPSTUBSTATE pThis)
+{
+    pspStubMmioWaitOnClrU32(0x32000f0, 0x80000000);
+
+    /* Missing something here... */
+
+    pspStubInitHwUnkSmnRanges(pThis);
+    pspStubMmioWrU32(0x3010618, 0);
+    pspStubMmioWrU32(0x301061c, 0);
+    pspStubMmioWrU32(0x3010620, 0);
+    pspStubMmioWrU32(0x3010624, 0);
+
+    pspStubSmnAndOrU32(pThis, 0x2d013ec, 0xffffffff, 0x14);
+    pspStubSmnAndOrU32(pThis, 0x2d01344, 0xf7ffffff, 0x80000000);
+    pspStubSmnAndOrU32(pThis, 0x17400404, 0xffffffff, 0x3ff);
+    pspStubSmnAndOrU32(pThis, 0x17500404, 0xffffffff, 0x3ff);
+    pspStubSmnAndOrU32(pThis, 0x0105a008, 0xfffffffe, 0);
+    pspStubSmnAndOrU32(pThis, 0x0105b008, 0xfffffffe, 0);
+    pspStubDelayMs(pThis, 100);
+    pspStubSmnAndOrU32(pThis, 0x0105b008, 0xffffffff, 1);
+    pspStubSmnAndOrU32(pThis, 0x0105a008, 0xffffffff, 1);
+
+    pspStubDelayMs(pThis, 1000);
+    pspStubMmioWrU32(0x301003c, 1);
+
+    /* Clearing base addresses of x86 mapping control registers. */
+    pspStubMmioWrU32(0x3230000, 0);
+    pspStubMmioWrU32(0x3230004, 0);
+    pspStubMmioWrU32(0x3230008, 0);
+    pspStubMmioWrU32(0x323000c, 0);
+    pspStubMmioWrU32(0x32303e0, 0);
+    pspStubMmioWrU32(0x32304d8, 0);
+}
+
+
+static uint32_t pspStubGetPhysDieId(PPSPSTUBSTATE pThis)
+{
+    void *pvMap = NULL;
+    int rc = pspStubSmnMap(pThis, 0x5a078, &pvMap);
+    if (!rc)
+    {
+        uint32_t uVal;
+        pspStubMmioAccess(&uVal, (void *)pvMap, sizeof(uint32_t));
+        pspStubSmnUnmapByPtr(pThis, pvMap);
+        return uVal & 0x3;
+    }
+
+    return 0xffffffff;
+}
+
+
 /**
  * The mainloop.
  *
@@ -1154,7 +1772,83 @@ static void pspStubLogFlush(void *pvUser, uint8_t *pbBuf, size_t cbBuf)
 {
     PPSPSTUBSTATE pThis = (PPSPSTUBSTATE)pvUser;
 
-    pspStubPduSend(pThis, INF_SUCCESS, 0 /*idCcd*/, PSPSERIALPDURRNID_NOTIFICATION_LOG_MSG, pbBuf, cbBuf);
+    if (pThis->fLogEnabled)
+    {
+        if (pThis->fEarlyLogOverSpi)
+        {
+            while (cbBuf >= 4)
+            {
+                *(volatile uint32_t *)(0x02aab000 + off) = *(uint32_t *)pbBuf;
+                off   += 4;
+                cbBuf -= 4;
+                pbBuf += 4;
+            }
+
+            if (cbBuf)
+            {
+                uint32_t uVal = 0;
+                switch (cbBuf)
+                {
+                    case 3:
+                        uVal = '\n' << 24 | pbBuf[2] << 16 | pbBuf[1] << 8 | pbBuf[0];
+                        break;
+                    case 2:
+                        uVal = '\n' << 24 | '\n' << 16 | pbBuf[1] << 8 | pbBuf[0];
+                        break;
+                    case 1:
+                        uVal = '\n' << 24 | '\n' << 16 | '\n' << 8 | pbBuf[0];
+                    default:
+                        break;
+                }
+
+                *(volatile uint32_t *)(0x02aab000 + off) = uVal;
+                off   += 4;
+            }
+        }
+        else
+            pspStubPduSend(pThis, INF_SUCCESS, 0 /*idCcd*/, PSPSERIALPDURRNID_NOTIFICATION_LOG_MSG, pbBuf, cbBuf);
+    }
+}
+
+
+void ExcpUndefInsn(void)
+{
+    LogRel("ExcpUndefInsn:\n");
+    for (;;);
+}
+
+void ExcpSwi(void)
+{
+    LogRel("ExcpSwi:\n");
+    for (;;);
+}
+
+
+void ExcpPrefAbrt(void)
+{
+    LogRel("ExcpPrefAbrt:\n");
+    for (;;);
+}
+
+
+void ExcpDataAbrt(void)
+{
+    LogRel("ExcpDataAbrt:\n");
+    for (;;);
+}
+
+
+void ExcpIrq(void)
+{
+    LogRel("ExcpIrq:\n");
+    for (;;);
+}
+
+
+void ExcpFiq(void)
+{
+    LogRel("ExcpFiq:\n");
+    for (;;);
 }
 
 
@@ -1163,47 +1857,55 @@ void main(void)
     /* Init the stub state and create the UART driver instances. */
     PPSPSTUBSTATE pThis = &g_StubState;
 
-    pThis->X86Uart.PhysX86UartBase     = 0xfffdfc0003f8;
-    pThis->X86Uart.pvUart              = NULL;
-    pThis->X86Uart.IfIoDev.pfnRegRead  = pspStubX86UartRegRead;
-    pThis->X86Uart.IfIoDev.pfnRegWrite = pspStubX86UartRegWrite;
+    off = 0;
+
     pThis->cCcds                       = 1; /** @todo Determine the amount of available CCDs (can't be read from boot ROM service page at all times) */
     pThis->fConnected                  = false;
+#ifdef PSP_SERIAL_STUB_SPI_MSG_CHAN
+    pThis->fSpiMsgChan                 = true;
+    pThis->fEarlyLogOverSpi            = false;
+    pThis->fLogEnabled                 = false; /* Needs a working transport channel. */
+#else
+    pThis->fSpiMsgChan                 = false;
+    pThis->fEarlyLogOverSpi            = true;
+    pThis->fLogEnabled                 = true;
+#endif
     pThis->cBeaconsSent                = 0;
     pThis->cPdusSent                   = 0;
-    pThis->cPduRecvNext                = 0;
+    pThis->cPduRecvNext                = 1;
     pspStubPduRecvReset(pThis);
     memset(&pThis->aX86MapSlots[0], 0, sizeof(pThis->aX86MapSlots));
     memset(&pThis->aSmnMapSlots[0], 0, sizeof(pThis->aSmnMapSlots));
     for (uint32_t i = 0; i < ELEMENTS(pThis->aX86MapSlots); i++)
         pThis->aX86MapSlots[i].PhysX86AddrBase = NIL_X86PADDR;
 
-    int rc = pspStubX86PhysMap(pThis, pThis->X86Uart.PhysX86UartBase, true /*fMmio*/, (void **)&pThis->X86Uart.pvUart);
-    if (!rc)
-    {
-        rc = PSPUartCreate(&pThis->Uart, &pThis->X86Uart.IfIoDev);
-        if (!rc)
-        {
-            rc = PSPUartParamsSet(&pThis->Uart, 115200, PSPUARTDATABITS_8BITS, PSPUARTPARITY_NONE, PSPUARTSTOPBITS_1BIT);
-            if (!rc)
-            {
-                rc = pspStubTimerInit(&pThis->Timer);
-                if (!rc)
-                {
-                    pThis->pTm = &pThis->Timer.Tm;
+    /* Init the timer. */
+    pspStubTimerInit(&pThis->Timer);
+    pThis->pTm = &pThis->Timer.Tm;
+    LOGLoggerInit(&pThis->Logger, pspStubLogFlush, pThis,
+                  "PspSerialStub", pThis->pTm, LOG_LOGGER_INIT_FLAGS_TS_FMT_HHMMSS);
+    LOGLoggerSetDefaultInstance(&pThis->Logger);
 
-                    rc = LOGLoggerInit(&pThis->Logger, pspStubLogFlush, pThis,
-                                       "PspSerialStub", pThis->pTm, LOG_LOGGER_INIT_FLAGS_TS_FMT_HHMMSS);
-                    if (!rc)
-                    {
-                        LOGLoggerSetDefaultInstance(&pThis->Logger);
-                        rc = pspStubMainloop(pThis);
-                    }
-                }
-            }
-        }
+    /* Don't do anything if this is not the master PSP. */
+    if (pspStubGetPhysDieId(pThis) != 0)
+    {
+        for (;;);
     }
 
+    pspStubInitHw(pThis);
+
+    LogRel("main: Hardware initialized\n");
+
+    /* Initialize the data transport mechanism selected. */
+    int rc = pspStubTranspInit(pThis);
+    if (!rc)
+    {
+        pThis->fLogEnabled = true;
+        LogRel("main: Transport channel initialized -> starting mainloop\n");
+        rc = pspStubMainloop(pThis);
+    }
+
+    LogRel("Serial stub is dead, waiting for reset...\n");
     /* Do not return on error. */
     for (;;);
 }

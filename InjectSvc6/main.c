@@ -2,13 +2,15 @@
 #include <cdefs.h>
 #include <svc.h>
 #include <string.h>
+#include <x86mem.h>
+#include <uart.h>
+#include <err.h>
 
 #include "psp-svc-inject.h"
+#include "psp-patch-addr.h"
 
 /** The address we patch the svc 0x6 replacement into. */
 #define PSP_FW_SVC_6_PATCH_ADDR ((void *)0x12000)
-#define PSP_FW_SVC_HANDLER_PATCH_ADDR ((void *)0x544)
-#define PSP_FW_SVC_APP_CLEANUP_HANDLER_PATCH_ADDR ((void *)0x540)
 
 #if 0
 static void puts(const char *pszStr)
@@ -62,6 +64,32 @@ static void dump_bytes(const uint8_t *pb, uint32_t cb)
 }
 #endif
 
+/**
+ * x86 UART register read callback.
+ */
+static int pspStubX86UartRegRead(PCPSPIODEVIF pIfIoDev, uint32_t offReg, void *pvBuf, size_t cbRead)
+{
+    /* UART supports only 1 byte wide register accesses. */
+    if (cbRead != 1) return ERR_INVALID_STATE;
+
+    psp_x86_mmio_read(0xfffdfc0003f8 + offReg, pvBuf, cbRead);
+    return 0;
+}
+
+
+/**
+ * x86 UART register write callback.
+ */
+static int pspStubX86UartRegWrite(PCPSPIODEVIF pIfIoDev, uint32_t offReg, const void *pvBuf, size_t cbWrite)
+{
+    /* UART supports only 1 byte wide register accesses. */
+    if (cbWrite != 1) return ERR_INVALID_STATE;
+
+    psp_x86_mmio_write(0xfffdfc0003f8 + offReg, pvBuf, cbWrite);
+    return 0;
+}
+
+
 void main(void)
 {
     /* Make sure the memory containing the page tables is cleared. */
@@ -81,6 +109,36 @@ void main(void)
     //*(volatile uint32_t *)PSP_FW_SVC_APP_CLEANUP_HANDLER_PATCH_ADDR = (uint32_t)PSP_FW_SVC_6_PATCH_ADDR;
 
     svc_dbg_print("Activating the svc interceptor\n"); /* DO NOT REMOVE OR EVERYTHING WILL FALL APART! */
+    svc_invalidate_mem(SVC_INV_MEM_OP_CLEAN_AND_INVALIDATE, 0, (void *)0x0, 12 * 4096);
+
+    /* Only master accesses UART, everyone else traps. */
+    if (*(volatile uint8_t *)(0x3f000 + 0xa50) == 0)
+    {
+        PSPIODEVIF IfIoDev;
+        PSPUART    Uart;
+
+        IfIoDev.pfnRegRead  = pspStubX86UartRegRead;
+        IfIoDev.pfnRegWrite = pspStubX86UartRegWrite;
+
+        int rc = PSPUartCreate(&Uart, &IfIoDev);
+        if (!rc)
+        {
+            svc_dbg_print("UART created\n");
+            rc = PSPUartParamsSet(&Uart, 115200, PSPUARTDATABITS_8BITS, PSPUARTPARITY_NONE, PSPUARTSTOPBITS_1BIT);
+            if (!rc)
+            {
+                svc_dbg_print("UART configured\n");
+                PSPUartWrite(&Uart, "Hello World!\n", sizeof("Hello World!\n") - 1, NULL);
+            }
+
+            svc_dbg_print("UART done\n");
+        }
+        else
+            svc_dbg_print("UART creation failed\n");
+    }
+    else
+        svc_dbg_print("Skipping UART test\n");
+
 #if 0
     svc_dbg_print("Overwriting x86 memory protection\n");
     *(uint8_t *)0x3360 = 0x4f;

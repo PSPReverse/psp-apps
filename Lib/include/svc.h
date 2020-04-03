@@ -51,6 +51,8 @@ uint32_t svc_query_two_64bit_values(uint64_t *pu64Val1, uint64_t *pu64Val2);
 
 uint16_t svc_x86_host_memory_copy_to_psp(PPSPX86MEMCOPYREQ pReq);
 
+uint16_t svc_x86_host_memory_copy_from_psp(PPSPX86MEMCOPYREQ pReq);
+
 uint32_t svc_call_other_psp(uint32_t idCcx, void *pvReq, size_t cbReq);
 
 void * svc_smn_map_ex(uint32_t u32SmnAddr, uint32_t idCcxTgt);

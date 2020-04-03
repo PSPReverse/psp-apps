@@ -1,5 +1,5 @@
 /** @file
- * X86 host memory related APIs.
+ * General types
  */
 
 /*
@@ -19,18 +19,9 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  */
-#ifndef ___x86mem_h
-#define ___x86mem_h
+#ifndef __types_h
+#define __types_h
 
-#include <types.h>
+#include <common/types.h>
 
-/**
- * Fallback method to copy memory from the x86 host using svc 0x26 to copy 4 bytes at a time.
- */
-int psp_x86_memory_copy_from_host_fallback(X86PADDR PhysX86AddrSrc, void *pvDst, size_t cbCopy);
-
-int psp_x86_mmio_read(X86PADDR PhysX86AddrSrc, void *pvDst, size_t cbRead);
-
-int psp_x86_mmio_write(X86PADDR PhysX86AddrDst, const void *pvSrc, size_t cbWrite);
-
-#endif /* ___x86mem_h */
+#endif

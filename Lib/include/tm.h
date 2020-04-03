@@ -104,6 +104,18 @@ int TMInit(PTM pTm);
 void TMTick(PTM pTm);
 
 /**
+ * Advances the clock of the timekeeping manager by the given amount of ticks and
+ * calls all expired callbacks.
+ *
+ * @returns nothing.
+ * @param   pTm      The timekeeping manager to use.
+ * @param   cMillies Number of milliseconds to advance the clock.
+ *
+ * @note Timers are only run once after the milliseconds where updated.
+ */
+void TMTickMultiple(PTM pTm, uint32_t cMillies);
+
+/**
  * Return the current milliseconds value since the clock started ticking.
  *
  * @returns Number of milliseconds since the clock started.
