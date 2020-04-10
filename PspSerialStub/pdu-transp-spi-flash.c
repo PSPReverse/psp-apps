@@ -34,15 +34,19 @@
 
 #define PSP_SPI_FLASH_SMN_ADDR          0x0a000000
 
+#define PSP_SPI_FLASH_LOCK_WAIT         5
+
 /** Where in the flash the message channel is located. */
 #define SPI_MSG_CHAN_HDR_OFF            0xaab000
 #define SPI_MSG_CHAN_AVAIL_OFF          0xaaa000
+#define SPI_MSG_CHAN_AVAIL_F_OFF        0xaac000
 #define SPI_FLASH_LOCK_OFF              0xaa0000
 #define SPI_FLASH_LOCK_UNLOCK_REQ_MAGIC 0x19570528 /* (Frank Schaetzing) */
 #define SPI_FLASH_LOCK_UNLOCKED_MAGIC   0x18280208 /* (Jules Verne) */
 #define SPI_FLASH_LOCK_LOCK_REQ_MAGIC   0x19380110 /* (Donald E Knuth) */
 #define SPI_FLASH_LOCK_LOCKED_MAGIC     0x18990223 /* (Erich Kaestner) */
 
+#define SPI_MSG_CHAN_AVAIL_MAGIC        0x19640522 /* (Dan Brown) */
 
 /**
  * SPI flash transport channel.
@@ -156,7 +160,7 @@ static void pspStubSpiFlashLock(PPSPPDUTRANSPINT pThis)
 
         do
         {
-            pspSerialStubDelayMs(100); /* Wait a moment for the emulator process the request. */
+            pspSerialStubDelayMs(PSP_SPI_FLASH_LOCK_WAIT); /* Wait a moment for the emulator process the request. */
             pspStubSpiFlashRead(pThis, SPI_FLASH_LOCK_OFF, &u32Read, sizeof(u32Read));
         }
         while (u32Read != SPI_FLASH_LOCK_LOCKED_MAGIC);
@@ -186,7 +190,7 @@ static void pspStubSpiFlashUnlock(PPSPPDUTRANSPINT pThis)
 
         do
         {
-            pspSerialStubDelayMs(100); /* Wait a moment for the emulator process the request. */
+            pspSerialStubDelayMs(PSP_SPI_FLASH_LOCK_WAIT); /* Wait a moment for the emulator process the request. */
             pspStubSpiFlashRead(pThis, SPI_FLASH_LOCK_OFF, &u32Read, sizeof(u32Read));
         }
         while (u32Read != SPI_FLASH_LOCK_UNLOCKED_MAGIC);
@@ -250,9 +254,18 @@ static size_t pspStubSpiFlashTranspPeek(PSPPDUTRANSP hPduTransp)
     PPSPPDUTRANSPINT pThis = hPduTransp;
 
     uint32_t u32Avail = 0;
-    pspStubSpiFlashLock(pThis);
-    pspStubSpiFlashRead(pThis, SPI_MSG_CHAN_AVAIL_OFF, &u32Avail, sizeof(u32Avail));
-    pspStubSpiFlashUnlock(pThis);
+    uint32_t u32ReadAvailMagic = 0;
+    pspStubSpiFlashRead(pThis, SPI_MSG_CHAN_AVAIL_F_OFF, &u32ReadAvailMagic, sizeof(u32ReadAvailMagic));
+    if (u32ReadAvailMagic == SPI_MSG_CHAN_AVAIL_MAGIC)
+    {
+        /*
+         * The magic indicates something is available for reading, now do the locking and get the actual
+         * number of bytes available.
+         */
+        pspStubSpiFlashLock(pThis);
+        pspStubSpiFlashRead(pThis, SPI_MSG_CHAN_AVAIL_OFF, &u32Avail, sizeof(u32Avail));
+        pspStubSpiFlashUnlock(pThis);
+    }
 
     return u32Avail;
 }
