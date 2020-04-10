@@ -211,6 +211,8 @@ static int pspStubSpiFlashTranspWrite(PSPPDUTRANSP hPduTransp, const void *pvBuf
         cbWriteLeft -= cbThisWrite;
     }
     pspStubSpiFlashUnlock(pThis);
+
+    return INF_SUCCESS;
 }
 
 
@@ -295,6 +297,7 @@ static int pspStubSpiFlashTranspInit(void *pvMem, size_t cbMem, PPSPPDUTRANSP ph
     }
     while (u32Magic != SPI_FLASH_LOCK_UNLOCKED_MAGIC);
 
+    *phPduTransp = pThis;
     return INF_SUCCESS;
 }
 
