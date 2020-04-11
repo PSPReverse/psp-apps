@@ -143,7 +143,7 @@ static void pspStubSpiFlashWrite(PPSPPDUTRANSPINT pThis, uint32_t off, const voi
         }
 
         if (cbWrite)
-            memcpy((uint8_t *)pbDst, pvBuf, cbWrite);
+            memcpy((uint8_t *)pbDst, pbSrc, cbWrite);
         pspSerialStubSmnUnmapByPtr(pvMap);
     }
 }
