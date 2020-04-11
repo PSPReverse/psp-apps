@@ -34,12 +34,13 @@
 
 #define PSP_SPI_FLASH_SMN_ADDR          0x0a000000
 
-#define PSP_SPI_FLASH_LOCK_WAIT         5
+#define PSP_SPI_FLASH_LOCK_WAIT         50
 
 /** Where in the flash the message channel is located. */
 #define SPI_MSG_CHAN_HDR_OFF            0xaab000
 #define SPI_MSG_CHAN_AVAIL_OFF          0xaaa000
 #define SPI_MSG_CHAN_AVAIL_F_OFF        0xaac000
+#define SPI_MSG_CHAN_STS_OFF            0xaad000
 #define SPI_FLASH_LOCK_OFF              0xaa0000
 #define SPI_FLASH_LOCK_UNLOCK_REQ_MAGIC 0x19570528 /* (Frank Schaetzing) */
 #define SPI_FLASH_LOCK_UNLOCKED_MAGIC   0x18280208 /* (Jules Verne) */
@@ -150,6 +151,25 @@ static void pspStubSpiFlashWrite(PPSPPDUTRANSPINT pThis, uint32_t off, const voi
 
 
 /**
+ * Write status code to the respective port.
+ *
+ * @returns nothing.
+ * @param   uSts                    Status code to write.
+ */
+static inline void pspStubSpiFlashStsWr(uint32_t uSts)
+{
+    void *pvMap;
+    int rc = pspSerialStubSmnMap(PSP_SPI_FLASH_SMN_ADDR + SPI_MSG_CHAN_STS_OFF, &pvMap);
+    if (!rc)
+    {
+        *(volatile uint32_t *)pvMap = uSts;
+        uint32_t uIgnored = *((volatile uint32_t *)pvMap + 1);
+        pspSerialStubSmnUnmapByPtr(pvMap);
+    }
+}
+
+
+/**
  * Lock the SPI flash for access.
  *
  * @returns nothing.
@@ -166,10 +186,23 @@ static void pspStubSpiFlashLock(PPSPPDUTRANSPINT pThis)
         pspStubSpiFlashWrite(pThis, SPI_FLASH_LOCK_OFF, &u32Write, sizeof(u32Write));
         pspStubSpiFlashRead(pThis, 0, &u32Write, sizeof(u32Write)); /* Dummy */
 
+#if 1
+        uint32_t cRounds = 0;
+#endif
         do
         {
             pspSerialStubDelayMs(PSP_SPI_FLASH_LOCK_WAIT); /* Wait a moment for the emulator process the request. */
             pspStubSpiFlashRead(pThis, SPI_FLASH_LOCK_OFF, &u32Read, sizeof(u32Read));
+
+#if 1 /* Debug code for a hang where the locked magic is never read after a lock request. */
+            cRounds++;
+            if (cRounds >= 10)
+            {
+                pspStubSpiFlashStsWr(SPI_FLASH_LOCK_LOCK_REQ_MAGIC);
+                pspStubSpiFlashWipeCache(pThis);
+                cRounds = 0;
+            }
+#endif
         }
         while (u32Read != SPI_FLASH_LOCK_LOCKED_MAGIC);
     }
@@ -196,10 +229,23 @@ static void pspStubSpiFlashUnlock(PPSPPDUTRANSPINT pThis)
         pspStubSpiFlashWrite(pThis, SPI_FLASH_LOCK_OFF, &u32Write, sizeof(u32Write));
         pspStubSpiFlashRead(pThis, 0, &u32Write, sizeof(u32Write)); /* Dummy */
 
+#if 1
+        uint32_t cRounds = 0;
+#endif
         do
         {
             pspSerialStubDelayMs(PSP_SPI_FLASH_LOCK_WAIT); /* Wait a moment for the emulator process the request. */
             pspStubSpiFlashRead(pThis, SPI_FLASH_LOCK_OFF, &u32Read, sizeof(u32Read));
+
+#if 1 /* Debug code for a hang where the unlocked magic is never read after a unlock request. */
+            cRounds++;
+            if (cRounds >= 10)
+            {
+                pspStubSpiFlashStsWr(SPI_FLASH_LOCK_UNLOCK_REQ_MAGIC);
+                pspStubSpiFlashWipeCache(pThis);
+                cRounds = 0;
+            }
+#endif
         }
         while (u32Read != SPI_FLASH_LOCK_UNLOCKED_MAGIC);
     }
