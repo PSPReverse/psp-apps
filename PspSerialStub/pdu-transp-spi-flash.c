@@ -55,6 +55,10 @@ typedef struct PSPPDUTRANSPINT
 {
     /** Number of times the SPI flash was locked. */
     uint32_t                    cSpiFlashLock;
+    /** Last accessed offset for reading (top optimize the cache wiping). */
+    uint32_t                    offReadLast;
+    /** Number of bytes available for reading. */
+    size_t                      cbReadAvail;
 } PSPPDUTRANSPINT;
 /** Pointer to the x86 UART PDU transport channel instance. */
 typedef PSPPDUTRANSPINT *PPSPPDUTRANSPINT;
@@ -94,15 +98,19 @@ static void pspStubSpiFlashWipeCache(PPSPPDUTRANSPINT pThis)
  */
 static void pspStubSpiFlashRead(PPSPPDUTRANSPINT pThis, uint32_t off, void *pvBuf, size_t cbRead)
 {
+    if (   pThis->offReadLast == 0xffff0000
+        || (   off >= pThis->offReadLast
+            && off < pThis->offReadLast + 256 /* cache size */))
+        pspStubSpiFlashWipeCache(pThis);
+
     /* Map the SMN region. */
-    pspStubSpiFlashWipeCache(pThis);
     void *pvMap;
     int rc = pspSerialStubSmnMap(PSP_SPI_FLASH_SMN_ADDR + off, &pvMap);
     if (!rc)
     {
-        /* Make sure we don't read cached data by issuing a read to a non accessed region. */
         memcpy(pvBuf, pvMap, cbRead);
         pspSerialStubSmnUnmapByPtr(pvMap);
+        pThis->offReadLast = off;
     }
 }
 
@@ -242,6 +250,12 @@ static int pspStubSpiFlashTranspRead(PSPPDUTRANSP hPduTransp, void *pvBuf, size_
             pspStubSpiFlashRead(pThis, 0, &cbThisRead, sizeof(cbThisRead)); /* Dummy */
         }
 
+#if 0
+        pThis->cbReadAvail -= cbThisRead;
+        /* Update the amount of data we can read here under the lock if we've read everything. */
+        if (!pThis->cbReadAvail)
+            pThis->cbReadAvail = pspStubSpiFlashTranspPeek(pThis);
+#endif
         pspStubSpiFlashUnlock(pThis);
     }
 
@@ -252,6 +266,12 @@ static int pspStubSpiFlashTranspRead(PSPPDUTRANSP hPduTransp, void *pvBuf, size_
 static size_t pspStubSpiFlashTranspPeek(PSPPDUTRANSP hPduTransp)
 {
     PPSPPDUTRANSPINT pThis = hPduTransp;
+
+#if 0
+    /* Don't bother with checking if there is still something left. */
+    if (pThis->cbReadAvail)
+        return pThis->cbReadAvail;
+#endif
 
     uint32_t u32Avail = 0;
     uint32_t u32ReadAvailMagic = 0;
@@ -265,6 +285,7 @@ static size_t pspStubSpiFlashTranspPeek(PSPPDUTRANSP hPduTransp)
         pspStubSpiFlashLock(pThis);
         pspStubSpiFlashRead(pThis, SPI_MSG_CHAN_AVAIL_OFF, &u32Avail, sizeof(u32Avail));
         pspStubSpiFlashUnlock(pThis);
+        pThis->cbReadAvail = u32Avail;
     }
 
     return u32Avail;
@@ -301,6 +322,8 @@ static int pspStubSpiFlashTranspInit(void *pvMem, size_t cbMem, PPSPPDUTRANSP ph
     PPSPPDUTRANSPINT pThis = (PPSPPDUTRANSPINT)pvMem;
 
     pThis->cSpiFlashLock = 0;
+    pThis->offReadLast   = 0xffff0000; /* Invalid, this will always wipe the cache. */
+    pThis->cbReadAvail   = 0;
 
     uint32_t u32Magic;
     do
