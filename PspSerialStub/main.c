@@ -1603,7 +1603,7 @@ void main(void)
     int rc = pspStubTranspInit(pThis);
     if (!rc)
     {
-        /*pThis->fLogEnabled = true;*/
+        pThis->fLogEnabled = true;
         pThis->fEarlyLogOverSpi = false;
         LogRel("main: Transport channel initialized -> starting mainloop\n");
         rc = pspStubMainloop(pThis);
