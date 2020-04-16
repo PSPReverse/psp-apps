@@ -170,6 +170,7 @@ static uint32_t off = 0;
 
 extern const PSPPDUTRANSPIF g_UartTransp;
 extern const PSPPDUTRANSPIF g_SpiFlashTransp;
+extern const PSPPDUTRANSPIF g_SpiFlashTranspEm100;
 
 /**
  * Available transport channels.
@@ -177,7 +178,8 @@ extern const PSPPDUTRANSPIF g_SpiFlashTransp;
 static PCPSPPDUTRANSPIF g_aPduTransp[] =
 {
     &g_UartTransp,
-    &g_SpiFlashTransp
+    &g_SpiFlashTransp,
+    &g_SpiFlashTranspEm100
 };
 
 
@@ -543,7 +545,7 @@ static int pspStubTranspInit(PPSPSTUBSTATE pThis)
     PCPSPPDUTRANSPIF pTranspIf = NULL;
 
     if (pThis->fSpiMsgChan)
-        pTranspIf = &g_SpiFlashTransp;
+        pTranspIf = &g_SpiFlashTranspEm100;
     else
         pTranspIf = &g_UartTransp;
 
@@ -894,7 +896,10 @@ static int pspStubCheckConnection(PPSPSTUBSTATE pThis, uint32_t cMillies)
 
             rc = pspStubPduSend(pThis, INF_SUCCESS, 0 /*idCcd*/, PSPSERIALPDURRNID_RESPONSE_CONNECT, &Resp, sizeof(Resp));
             if (!rc)
+            {
+                LogRel("Someone connected to us \\o/...\n");
                 pThis->fConnected = true;
+            }
         }
         /** @todo else Send out of band error. */
     }
@@ -1144,7 +1149,7 @@ static int pspStubPduProcessPspX86MmioXfer(PPSPSTUBSTATE pThis, const void *pvPa
                                     ? PSPSERIALPDURRNID_RESPONSE_PSP_X86_MMIO_WRITE
                                     : PSPSERIALPDURRNID_RESPONSE_PSP_X86_MMIO_READ;
     void *pvMap = NULL;
-    int rc = pspStubX86PhysMap(pThis, pReq->PhysX86Start, false /*fMmio*/, &pvMap);
+    int rc = pspStubX86PhysMap(pThis, pReq->PhysX86Start, true /*fMmio*/, &pvMap);
     if (!rc)
     {
         const void *pvRespPayload = NULL;
