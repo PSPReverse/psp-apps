@@ -1,5 +1,8 @@
 .extern SCRATCH_STACK_TOP
+.extern BSS_START
+.extern BSS_END
 .extern main
+.extern memset
 _start:
   mov r4, r0         /* Save the arguments. */
   mov r5, r1

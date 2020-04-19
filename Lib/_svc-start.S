@@ -3,7 +3,10 @@
 .extern SCRATCH_STACK_TOP_ABORT
 .extern SCRATCH_STACK_TOP_IRQ
 .extern SCRATCH_STACK_TOP_FIQ
+.extern BSS_START
+.extern BSS_END
 .extern main
+.extern memset
 .extern ExcpUndefInsn
 .extern ExcpSwi
 .extern ExcpPrefAbrt
@@ -31,6 +34,11 @@ _start:
   ldr sp, =SCRATCH_STACK_TOP_UNDEF
   msr cpsr, #0x53
   ldr sp, =SCRATCH_STACK_TOP_SVC
+  ldr r0, =BSS_START
+  mov r1, #0
+  ldr r2, =BSS_END
+  sub r2, r2, r1
+  blx memset                        /* Clear BSS section. */
   blx main
 
 _undef_insn:
