@@ -1,11 +1,13 @@
 MEMORY
 {
-    RAM: ORIGIN = 0x10000, LENGTH = 0x2f000 /* Code module area from 0x10000 right to the start of the boot ROM servie page */
+    RAM : ORIGIN = 0x10000, LENGTH = 0x2f000 /* Code module area from 0x10000 right to the start of the boot ROM servie page */
 }
 
 
 SECTIONS
 {
+    . = 0x10000;
+
     .text ALIGN(0x10):
     {
         *(.text);
