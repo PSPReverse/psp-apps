@@ -53,7 +53,7 @@
 .globl \a_Name\()Asm
 \a_Name\()Asm:
     push {lr}
-    ldr lr, [sp, #-8] /* Rearrange the last argument on the stack as the lr push has changed the layout. */
+    ldr lr, [sp, #4] /* Rearrange the last argument on the stack as the lr push has changed the layout. */
     push {lr}
     blx \a_Name
     pop {lr}
