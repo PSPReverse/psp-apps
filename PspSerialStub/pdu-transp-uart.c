@@ -140,7 +140,11 @@ static int pspStubUartTranspInit(void *pvMem, size_t cbMem, PPSPPDUTRANSP phPduT
     {
         rc = PSPUartCreate(&pThis->Uart, &pThis->IfIoDev);
         if (!rc)
+        {
             rc = PSPUartParamsSet(&pThis->Uart, 115200, PSPUARTDATABITS_8BITS, PSPUARTPARITY_NONE, PSPUARTSTOPBITS_1BIT);
+            if (!rc)
+                *phPduTransp = pThis;
+        }
     }
 
     return rc;
