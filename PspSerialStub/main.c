@@ -221,6 +221,13 @@ static PCPSPPDUTRANSPIF g_aPduTransp[] =
 };
 
 
+extern size_t pspStubCmIfInBufPeekAsm(PCCMIF pCmIf, uint32_t idInBuf);
+extern int pspStubCmIfInBufPollAsm(PCCMIF pCmIf, uint32_t idInBuf, uint32_t cMillies);
+extern int pspStubCmIfInBufReadAsm(PCCMIF pCmIf, uint32_t idInBuf, void *pvBuf, size_t cbRead, size_t *pcbRead);
+extern int pspStubCmIfOutBufWriteAsm(PCCMIF pCmIf, uint32_t idOutBuf, const void *pvBuf, size_t cbWrite, size_t *pcbWritten);
+extern void pspStubCmIfDelayMsAsm(PCCMIF pCmIf, uint32_t cMillies);
+extern uint32_t pspStubCmIfTsGetMilliAsm(PCCMIF pCmIf);
+
 static int pspStubPduProcess(PPSPSTUBSTATE pThis, PCPSPSERIALPDUHDR pPdu);
 
 
@@ -998,7 +1005,7 @@ static int pspStubPduRecvProcessSingle(PPSPSTUBSTATE pThis, uint32_t cMillies)
 /**
  * @copydoc{CMIF,pfnInBufPeek}
  */
-static size_t pspStubCmIfInBufPeek(PCCMIF pCmIf, uint32_t idInBuf)
+size_t pspStubCmIfInBufPeek(PCCMIF pCmIf, uint32_t idInBuf)
 {
     PCCMEXEC pExec = (PCCMEXEC)pCmIf;
     PPSPSTUBSTATE pThis = pExec->pStub;
@@ -1020,7 +1027,7 @@ static size_t pspStubCmIfInBufPeek(PCCMIF pCmIf, uint32_t idInBuf)
 /**
  * @copydoc{CMIF,pfnInBufPoll}
  */
-static int pspStubCmIfInBufPoll(PCCMIF pCmIf, uint32_t idInBuf, uint32_t cMillies)
+int pspStubCmIfInBufPoll(PCCMIF pCmIf, uint32_t idInBuf, uint32_t cMillies)
 {
     PCCMEXEC pExec = (PCCMEXEC)pCmIf;
     PPSPSTUBSTATE pThis = pExec->pStub;
@@ -1030,13 +1037,16 @@ static int pspStubCmIfInBufPoll(PCCMIF pCmIf, uint32_t idInBuf, uint32_t cMillie
     {
         PPSPINBUF pInBuf = &pThis->aInBufs[idInBuf];
 
-        do
+        if (!pInBuf->offInBuf)
         {
-            uint32_t tsStart = pspStubGetMillies(pThis);
-            rc = pspStubPduRecvProcessSingle(pThis, cMillies);
-            cMillies -= MIN(pspStubGetMillies(pThis) - tsStart, cMillies);
-        } while (   !rc
-                 && !pInBuf->offInBuf);
+            do
+            {
+                uint32_t tsStart = pspStubGetMillies(pThis);
+                rc = pspStubPduRecvProcessSingle(pThis, cMillies);
+                cMillies -= MIN(pspStubGetMillies(pThis) - tsStart, cMillies);
+            } while (   !rc
+                     && !pInBuf->offInBuf);
+        }
     }
     else
         rc = ERR_INVALID_PARAMETER;
@@ -1048,7 +1058,7 @@ static int pspStubCmIfInBufPoll(PCCMIF pCmIf, uint32_t idInBuf, uint32_t cMillie
 /**
  * @copydoc{CMIF,pfnInBufRead}
  */
-static int pspStubCmIfInBufRead(PCCMIF pCmIf, uint32_t idInBuf, void *pvBuf, size_t cbRead, size_t *pcbRead)
+int pspStubCmIfInBufRead(PCCMIF pCmIf, uint32_t idInBuf, void *pvBuf, size_t cbRead, size_t *pcbRead)
 {
     PCCMEXEC pExec = (PCCMEXEC)pCmIf;
     PPSPSTUBSTATE pThis = pExec->pStub;
@@ -1100,7 +1110,7 @@ static int pspStubCmIfInBufRead(PCCMIF pCmIf, uint32_t idInBuf, void *pvBuf, siz
 /**
  * @copydoc{CMIF,pfnOutBufWrite}
  */
-static int pspStubCmIfOutBufWrite(PCCMIF pCmIf, uint32_t idOutBuf, const void *pvBuf, size_t cbWrite, size_t *pcbWritten)
+int pspStubCmIfOutBufWrite(PCCMIF pCmIf, uint32_t idOutBuf, const void *pvBuf, size_t cbWrite, size_t *pcbWritten)
 {
     PCCMEXEC pExec = (PCCMEXEC)pCmIf;
     PPSPSTUBSTATE pThis = pExec->pStub;
@@ -1121,7 +1131,7 @@ static int pspStubCmIfOutBufWrite(PCCMIF pCmIf, uint32_t idOutBuf, const void *p
 /**
  * @copydoc{CMIF,pfnDelayMs}
  */
-static void pspStubCmIfDelayMs(PCCMIF pCmIf, uint32_t cMillies)
+void pspStubCmIfDelayMs(PCCMIF pCmIf, uint32_t cMillies)
 {
     PCCMEXEC pExec = (PCCMEXEC)pCmIf;
     PPSPSTUBSTATE pThis = pExec->pStub;
@@ -1133,7 +1143,7 @@ static void pspStubCmIfDelayMs(PCCMIF pCmIf, uint32_t cMillies)
 /**
  * @copydoc{CMIF,pfnTsGetMilli}
  */
-static uint32_t pspStubCmIfTsGetMilli(PCCMIF pCmIf)
+uint32_t pspStubCmIfTsGetMilli(PCCMIF pCmIf)
 {
     PCCMEXEC pExec = (PCCMEXEC)pCmIf;
     PPSPSTUBSTATE pThis = pExec->pStub;
@@ -1506,12 +1516,12 @@ static int pspStubPduProcessExecCodeMod(PPSPSTUBSTATE pThis, const void *pvPaylo
             CMEXEC CmExec;
 
             CmExec.pStub               = pThis;
-            CmExec.CmIf.pfnInBufPeek   = pspStubCmIfInBufPeek;
-            CmExec.CmIf.pfnInBufPoll   = pspStubCmIfInBufPoll;
-            CmExec.CmIf.pfnInBufRead   = pspStubCmIfInBufRead;
-            CmExec.CmIf.pfnOutBufWrite = pspStubCmIfOutBufWrite;
-            CmExec.CmIf.pfnDelayMs     = pspStubCmIfDelayMs;
-            CmExec.CmIf.pfnTsGetMilli  = pspStubCmIfTsGetMilli;
+            CmExec.CmIf.pfnInBufPeek   = pspStubCmIfInBufPeekAsm;
+            CmExec.CmIf.pfnInBufPoll   = pspStubCmIfInBufPollAsm;
+            CmExec.CmIf.pfnInBufRead   = pspStubCmIfInBufReadAsm;
+            CmExec.CmIf.pfnOutBufWrite = pspStubCmIfOutBufWriteAsm;
+            CmExec.CmIf.pfnDelayMs     = pspStubCmIfDelayMsAsm;
+            CmExec.CmIf.pfnTsGetMilli  = pspStubCmIfTsGetMilliAsm;
 
             /* Call the module. */
             PFNCMENTRY pfnEntry = (PFNCMENTRY)CM_FLAT_BINARY_LOAD_ADDR;

@@ -2,7 +2,7 @@ CROSS_COMPILE=arm-none-eabi-
 CFLAGS=-O2 -DIN_PSP -g -I../include -I../Lib/include -std=gnu99 -fomit-frame-pointer -nostartfiles -ffreestanding -Wextra -Werror -march=armv7ve -mthumb
 VPATH=../Lib/src
 
-OBJS = main.o string.o log.o tm.o uart.o pdu-transp-uart.o pdu-transp-spi-flash.o pdu-transp-spi-em100.o
+OBJS = main.o thumb-interwork.o string.o log.o tm.o uart.o pdu-transp-uart.o pdu-transp-spi-flash.o pdu-transp-spi-em100.o
 
 all : psp-serial-stub.elf psp-serial-stub.raw
 
