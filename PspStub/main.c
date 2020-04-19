@@ -7,7 +7,6 @@
 #include <x86mem.h>
 #include <binloader.h>
 
-#define IN_PSP
 #include <psp-stub/psp-stub.h>
 #include <sev/sev.h>
 

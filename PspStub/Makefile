@@ -1,5 +1,5 @@
 CROSS_COMPILE=arm-none-eabi-
-CFLAGS=-O2 -g -I../include -I../Lib/include -std=gnu99 -fomit-frame-pointer -nostartfiles -ffreestanding -Wextra -Werror
+CFLAGS=-O2 -g -DIN_PSP -I../include -I../Lib/include -std=gnu99 -fomit-frame-pointer -nostartfiles -ffreestanding -Wextra -Werror
 VPATH=../Lib/src
 
 OBJS = main.o string.o svc.o log.o tm.o x86mem.o
