@@ -30,6 +30,7 @@
 #include <uart.h>
 
 #include <psp-stub/psp-serial-stub.h>
+#include <psp-stub/cm-if.h>
 
 #include "pdu-transp.h"
 
@@ -88,6 +89,24 @@ typedef struct PSPTIMER
 } PSPTIMER;
 /** Pointer to a timer. */
 typedef PSPTIMER *PPSPTIMER;
+
+
+/**
+ * Input buffer related state.
+ */
+typedef struct PSPINBUF
+{
+    /** Start address of the input buffer. */
+    void                        *pvInBuf;
+    /** Size of the input buffer. */
+    size_t                      cbInBuf;
+    /** Offset where to write next in the input buffer. */
+    uint32_t                    offInBuf;
+} PSPINBUF;
+/** Pointer to an input buffer. */
+typedef PSPINBUF *PPSPINBUF;
+/** Pointer to a const input buffer. */
+typedef const PSPINBUF *PCPSPINBUF;
 
 
 /**
@@ -155,11 +174,30 @@ typedef struct PSPSTUBSTATE
     uint32_t                    offPduRecv;
     /** The PDU receive buffer. */
     uint8_t                     abPdu[_4K];
+    /** Input buffer related state. */
+    PSPINBUF                    aInBufs[2];
     /** Scratch space. */
     uint8_t                     abScratch[16 * _1K]; /** @todo Check alignment on 8 byte boundary. */
 } PSPSTUBSTATE;
 /** Pointer to the binary loader state. */
 typedef PSPSTUBSTATE *PPSPSTUBSTATE;
+
+
+/**
+ * Code module exec helper.
+ */
+typedef struct CMEXEC
+{
+    /** Pointer to the interface table. */
+    CMIF                        CmIf;
+    /** Pointer to the stub state. */
+    PPSPSTUBSTATE               pStub;
+} CMEXEC;
+/** Pointer to a code module exec helper. */
+typedef CMEXEC *PCMEXEC;
+/** Pointer to a const code module exec helper. */
+typedef const CMEXEC *PCCMEXEC;
+
 
 #define PSP_SERIAL_STUB_EARLY_SPI_LOG_OFF 0x0
 
@@ -181,6 +219,9 @@ static PCPSPPDUTRANSPIF g_aPduTransp[] =
     &g_SpiFlashTransp,
     &g_SpiFlashTranspEm100
 };
+
+
+static int pspStubPduProcess(PPSPSTUBSTATE pThis, PCPSPSERIALPDUHDR pPdu);
 
 
 /**
@@ -626,6 +667,64 @@ static int pspStubTranspEnd(PPSPSTUBSTATE pThis)
 
 
 /**
+ * Sends the given PDU - two payload parts.
+ *
+ * @returns Status code.
+ * @param   pThis                   The serial stub instance data.
+ * @param   rcReq                   Status code for a sresponse PDU.
+ * @param   idCcd                   The CCD ID the PDU is designated for.
+ * @param   enmPduRrnId             The Request/Response/Notification ID.
+ * @param   pvPayload1              Pointer to the PDU payload to send, optional.
+ * @param   cbPayload1              Size of the PDU payload in bytes.
+ * @param   pvPayload2              Pointer to the PDU payload to send, optional.
+ * @param   cbPayload2              Size of the PDU payload in bytes.
+ */
+static int pspStubPduSend2(PPSPSTUBSTATE pThis, int32_t rcReq, uint32_t idCcd, PSPSERIALPDURRNID enmPduRrnId,
+                           const void *pvPayload1, size_t cbPayload1, const void *pvPayload2, size_t cbPayload2)
+{
+    PSPSERIALPDUHDR PduHdr;
+    PSPSERIALPDUFOOTER PduFooter;
+
+    /* Initialize header and footer. */
+    PduHdr.u32Magic           = PSP_SERIAL_PSP_2_EXT_PDU_START_MAGIC;
+    PduHdr.u.Fields.cbPdu     = cbPayload1 + cbPayload2;
+    PduHdr.u.Fields.cPdus     = ++pThis->cPdusSent;
+    PduHdr.u.Fields.enmRrnId  = enmPduRrnId;
+    PduHdr.u.Fields.idCcd     = idCcd;
+    PduHdr.u.Fields.rcReq     = rcReq;
+    PduHdr.u.Fields.tsMillies = pspStubGetMillies(pThis);
+
+    uint32_t uChkSum = 0;
+    for (uint32_t i = 0; i < ELEMENTS(PduHdr.u.ab); i++)
+        uChkSum += PduHdr.u.ab[i];
+
+    const uint8_t *pbPayload = (const uint8_t *)pvPayload1;
+    for (size_t i = 0; i < cbPayload1; i++)
+        uChkSum += pbPayload[i];
+
+    pbPayload = (const uint8_t *)pvPayload2;
+    for (size_t i = 0; i < cbPayload2; i++)
+        uChkSum += pbPayload[i];
+
+    PduFooter.u32ChkSum = (0xffffffff - uChkSum) + 1;
+    PduFooter.u32Magic  = PSP_SERIAL_PSP_2_EXT_PDU_END_MAGIC;
+
+    /* Send everything, header first, then payload and footer last. */
+    pspStubTranspBegin(pThis);
+    int rc = pspStubTranspWrite(pThis, &PduHdr, sizeof(PduHdr));
+    if (!rc && pvPayload1 && cbPayload1)
+        rc = pspStubTranspWrite(pThis, pvPayload1, cbPayload1);
+    if (!rc && pvPayload2 && cbPayload2)
+        rc = pspStubTranspWrite(pThis, pvPayload2, cbPayload2);
+    if (!rc)
+        rc = pspStubTranspWrite(pThis, &PduFooter, sizeof(PduFooter));
+    pspStubTranspEnd(pThis);
+
+    return rc;
+}
+
+
+/**
  * Sends the given PDU.
  *
  * @returns Status code.
@@ -638,39 +737,7 @@ static int pspStubTranspEnd(PPSPSTUBSTATE pThis)
  */
 static int pspStubPduSend(PPSPSTUBSTATE pThis, int32_t rcReq, uint32_t idCcd, PSPSERIALPDURRNID enmPduRrnId, const void *pvPayload, size_t cbPayload)
 {
-    PSPSERIALPDUHDR PduHdr;
-    PSPSERIALPDUFOOTER PduFooter;
-
-    /* Initialize header and footer. */
-    PduHdr.u32Magic           = PSP_SERIAL_PSP_2_EXT_PDU_START_MAGIC;
-    PduHdr.u.Fields.cbPdu     = cbPayload;
-    PduHdr.u.Fields.cPdus     = ++pThis->cPdusSent;
-    PduHdr.u.Fields.enmRrnId  = enmPduRrnId;
-    PduHdr.u.Fields.idCcd     = idCcd;
-    PduHdr.u.Fields.rcReq     = rcReq;
-    PduHdr.u.Fields.tsMillies = pspStubGetMillies(pThis);
-
-    uint32_t uChkSum = 0;
-    for (uint32_t i = 0; i < ELEMENTS(PduHdr.u.ab); i++)
-        uChkSum += PduHdr.u.ab[i];
-
-    const uint8_t *pbPayload = (const uint8_t *)pvPayload;
-    for (size_t i = 0; i < cbPayload; i++)
-        uChkSum += pbPayload[i];
-
-    PduFooter.u32ChkSum = (0xffffffff - uChkSum) + 1;
-    PduFooter.u32Magic  = PSP_SERIAL_PSP_2_EXT_PDU_END_MAGIC;
-
-    /* Send everything, header first, then payload and footer last. */
-    pspStubTranspBegin(pThis);
-    int rc = pspStubTranspWrite(pThis, &PduHdr, sizeof(PduHdr));
-    if (!rc && pvPayload && cbPayload)
-        rc = pspStubTranspWrite(pThis, pvPayload, cbPayload);
-    if (!rc)
-        rc = pspStubTranspWrite(pThis, &PduFooter, sizeof(PduFooter));
-    pspStubTranspEnd(pThis);
-
-    return rc;
+    pspStubPduSend2(pThis, rcReq, idCcd, enmPduRrnId, pvPayload, cbPayload, NULL /*pvPayload2*/, 0 /*cbPayload2*/);
 }
 
 
@@ -906,6 +973,172 @@ static int pspStubCheckConnection(PPSPSTUBSTATE pThis, uint32_t cMillies)
     /* else Timeout -> return */
 
     return INF_SUCCESS;
+}
+
+
+/**
+ * Waits for single PDU to arrive in the given timespan and processes it.
+ *
+ * @returns Status code.
+ * @param   pThis                   The serial stub instance data.
+ * @param   cMillies                Amount of milliseconds to wait.
+ */
+static int pspStubPduRecvProcessSingle(PPSPSTUBSTATE pThis, uint32_t cMillies)
+{
+    PCPSPSERIALPDUHDR pPdu;
+
+    int rc = pspStubPduRecv(pThis, &pPdu, cMillies);
+    if (!rc)
+        rc = pspStubPduProcess(pThis, pPdu);
+
+    return rc;
+}
+
+
+/**
+ * @copydoc{CMIF,pfnInBufPeek}
+ */
+static size_t pspStubCmIfInBufPeek(PCCMIF pCmIf, uint32_t idInBuf)
+{
+    PCCMEXEC pExec = (PCCMEXEC)pCmIf;
+    PPSPSTUBSTATE pThis = pExec->pStub;
+
+    size_t cbAvail = 0;
+    if (idInBuf < ELEMENTS(pThis->aInBufs))
+    {
+        PPSPINBUF pInBuf = &pThis->aInBufs[idInBuf];
+        if (!pInBuf->offInBuf) /* One check whether we can receive a new PDU. */
+            pspStubPduRecvProcessSingle(pThis, 0 /*cMillies*/);
+
+        cbAvail = pInBuf->offInBuf;
+    }
+
+    return cbAvail;
+}
+
+
+/**
+ * @copydoc{CMIF,pfnInBufPoll}
+ */
+static int pspStubCmIfInBufPoll(PCCMIF pCmIf, uint32_t idInBuf, uint32_t cMillies)
+{
+    PCCMEXEC pExec = (PCCMEXEC)pCmIf;
+    PPSPSTUBSTATE pThis = pExec->pStub;
+
+    int rc = INF_SUCCESS;
+    if (idInBuf < ELEMENTS(pThis->aInBufs))
+    {
+        PPSPINBUF pInBuf = &pThis->aInBufs[idInBuf];
+
+        do
+        {
+            uint32_t tsStart = pspStubGetMillies(pThis);
+            rc = pspStubPduRecvProcessSingle(pThis, cMillies);
+            cMillies -= MIN(pspStubGetMillies(pThis) - tsStart, cMillies);
+        } while (   !rc
+                 && !pInBuf->offInBuf);
+    }
+    else
+        rc = ERR_INVALID_PARAMETER;
+
+    return rc;
+}
+
+
+/**
+ * @copydoc{CMIF,pfnInBufRead}
+ */
+static int pspStubCmIfInBufRead(PCCMIF pCmIf, uint32_t idInBuf, void *pvBuf, size_t cbRead, size_t *pcbRead)
+{
+    PCCMEXEC pExec = (PCCMEXEC)pCmIf;
+    PPSPSTUBSTATE pThis = pExec->pStub;
+
+    int rc = INF_SUCCESS;
+    if (idInBuf < ELEMENTS(pThis->aInBufs))
+    {
+        PPSPINBUF pInBuf = &pThis->aInBufs[idInBuf];
+
+        if (pcbRead)
+        {
+            /* Can handle partial reads. */
+            if (pspStubCmIfInBufPeek(pCmIf, idInBuf))
+            {
+                size_t cbThisRead = MIN(pInBuf->offInBuf, cbRead);
+                memcpy(pvBuf, pInBuf->pvInBuf, cbThisRead);
+
+                /* Move everyting to the front. */
+                if (cbThisRead < pInBuf->offInBuf)
+                {
+                    uint8_t *pbInBuf = (uint8_t *)pInBuf->pvInBuf;
+                    size_t cbLeft = pInBuf->offInBuf - cbThisRead;
+
+                    /** @todo memmove. */
+                    for (uint32_t i = 0; i < cbLeft; i++)
+                        pbInBuf[i] = pbInBuf[cbThisRead + i];
+
+                    pInBuf->offInBuf -= cbThisRead;
+                }
+                *pcbRead = cbThisRead;
+            }
+            else
+                *pcbRead = 0;
+        }
+        else
+        {
+            /* Loop until we've read all requested data. */
+            uint8_t *pbBuf = (uint8_t *)pvBuf;
+            
+        }
+    }
+    else
+        rc = ERR_INVALID_PARAMETER;
+
+    return rc;
+}
+
+
+/**
+ * @copydoc{CMIF,pfnOutBufWrite}
+ */
+static int pspStubCmIfOutBufWrite(PCCMIF pCmIf, uint32_t idOutBuf, const void *pvBuf, size_t cbWrite, size_t *pcbWritten)
+{
+    PCCMEXEC pExec = (PCCMEXEC)pCmIf;
+    PPSPSTUBSTATE pThis = pExec->pStub;
+
+    PSPSERIALOUTBUFNOT OutBufNot;
+    OutBufNot.idOutBuf = idOutBuf;
+    OutBufNot.u32Pad0  = 0;
+    int rc = pspStubPduSend2(pThis, INF_SUCCESS, 0 /*idCcd*/, PSPSERIALPDURRNID_NOTIFICATION_OUT_BUF,
+                             &OutBufNot, sizeof(OutBufNot), pvBuf, cbWrite);
+    if (   !rc
+        && pcbWritten)
+        *pcbWritten = cbWrite;
+
+    return rc;
+}
+
+
+/**
+ * @copydoc{CMIF,pfnDelayMs}
+ */
+static void pspStubCmIfDelayMs(PCCMIF pCmIf, uint32_t cMillies)
+{
+    PCCMEXEC pExec = (PCCMEXEC)pCmIf;
+    PPSPSTUBSTATE pThis = pExec->pStub;
+
+    pspStubDelayMs(pThis, cMillies);
+}
+
+
+/**
+ * @copydoc{CMIF,pfnTsGetMilli}
+ */
+static uint32_t pspStubCmIfTsGetMilli(PCCMIF pCmIf)
+{
+    PCCMEXEC pExec = (PCCMEXEC)pCmIf;
+    PPSPSTUBSTATE pThis = pExec->pStub;
+
+    return pspStubGetMillies(pThis);
 }
 
 
@@ -1177,6 +1410,128 @@ static int pspStubPduProcessPspX86MmioXfer(PPSPSTUBSTATE pThis, const void *pvPa
 
 
 /**
+ * Writes to the given input buffer.
+ *
+ * @returns Status code.
+ * @param   pThis                   The serial stub instance data.
+ * @param   pvPayload               PDU payload.
+ * @param   cbPayload               Payload size in bytes.
+ */
+static int pspStubPduProcessInputBufWrite(PPSPSTUBSTATE pThis, const void *pvPayload, size_t cbPayload)
+{
+    PCPSPSERIALINBUFWRREQ pReq = (PCPSPSERIALINBUFWRREQ)pvPayload;
+
+    int rc = INF_SUCCESS;
+    if (   cbPayload > sizeof(*pReq)
+        && pReq->idInBuf < ELEMENTS(pThis->aInBufs))
+    {
+        PPSPINBUF pInBuf = &pThis->aInBufs[pReq->idInBuf];
+        uint8_t *pbData = (uint8_t *)(pReq + 1);
+        uint8_t *pbDst = (uint8_t *)pInBuf->pvInBuf + pInBuf->offInBuf;
+        size_t cbData = cbPayload - sizeof(*pReq);
+
+        if (cbData <= pInBuf->cbInBuf - pInBuf->offInBuf)
+        {
+            memcpy(pbDst, pbData, cbData);
+            pInBuf->offInBuf += cbData;
+        }
+        else
+            rc = ERR_INVALID_PARAMETER;
+    }
+    else
+        rc = ERR_INVALID_PARAMETER;
+
+    return pspStubPduSend(pThis, rc, 0 /*idCcd*/, PSPSERIALPDURRNID_RESPONSE_INPUT_BUF_WRITE, NULL /*pvRespPayload*/, 0 /*cbRespPayload*/);
+}
+
+
+/**
+ * Initiates a load code module request.
+ *
+ * @returns Status code.
+ * @param   pThis                   The serial stub instance data.
+ * @param   pvPayload               PDU payload.
+ * @param   cbPayload               Payload size in bytes.
+ */
+static int pspStubPduProcessLoadCodeMod(PPSPSTUBSTATE pThis, const void *pvPayload, size_t cbPayload)
+{
+    PCPSPSERIALLOADCODEMODREQ pReq = (PCPSPSERIALLOADCODEMODREQ)pvPayload;
+
+    int rc = INF_SUCCESS;
+    if (   cbPayload == sizeof(*pReq)
+        && pReq->u32Pad0 < ELEMENTS(pThis->aInBufs))
+    {
+        if (pReq->enmCmType == PSPSERIALCMTYPE_FLAT_BINARY)
+        {
+            PPSPINBUF pInBuf = &pThis->aInBufs[pReq->u32Pad0];
+            pInBuf->pvInBuf  = (void *)CM_FLAT_BINARY_LOAD_ADDR;
+            pInBuf->cbInBuf  = 0x3f000 - CM_FLAT_BINARY_LOAD_ADDR;
+            pInBuf->offInBuf = 0;
+        }
+        else
+            rc = ERR_NOT_IMPLEMENTED;
+    }
+    else
+        rc = ERR_INVALID_PARAMETER;
+
+    return pspStubPduSend(pThis, rc, 0 /*idCcd*/, PSPSERIALPDURRNID_RESPONSE_LOAD_CODE_MOD, NULL /*pvRespPayload*/, 0 /*cbRespPayload*/);
+}
+
+
+/**
+ * Executes a previously loaded code module.
+ *
+ * @returns Status code.
+ * @param   pThis                   The serial stub instance data.
+ * @param   pvPayload               PDU payload.
+ * @param   cbPayload               Payload size in bytes.
+ */
+static int pspStubPduProcessExecCodeMod(PPSPSTUBSTATE pThis, const void *pvPayload, size_t cbPayload)
+{
+    PCPSPSERIALEXECCODEMODREQ pReq = (PCPSPSERIALEXECCODEMODREQ)pvPayload;
+
+    int rc = INF_SUCCESS;
+    if (cbPayload == sizeof(*pReq))
+    {
+        uint32_t u32Arg0 = pReq->u32Arg0;
+        uint32_t u32Arg1 = pReq->u32Arg1;
+        uint32_t u32Arg2 = pReq->u32Arg2;
+        uint32_t u32Arg3 = pReq->u32Arg3;
+
+        /* Send a success response before running the code module. */
+        rc = pspStubPduSend(pThis, rc, 0 /*idCcd*/, PSPSERIALPDURRNID_RESPONSE_EXEC_CODE_MOD, NULL /*pvRespPayload*/, 0 /*cbRespPayload*/);
+        if (!rc)
+        {
+            /* Setup the code exec helper. */
+            CMEXEC CmExec;
+
+            CmExec.pStub               = pThis;
+            CmExec.CmIf.pfnInBufPeek   = pspStubCmIfInBufPeek;
+            CmExec.CmIf.pfnInBufPoll   = pspStubCmIfInBufPoll;
+            CmExec.CmIf.pfnInBufRead   = pspStubCmIfInBufRead;
+            CmExec.CmIf.pfnOutBufWrite = pspStubCmIfOutBufWrite;
+            CmExec.CmIf.pfnDelayMs     = pspStubCmIfDelayMs;
+            CmExec.CmIf.pfnTsGetMilli  = pspStubCmIfTsGetMilli;
+
+            /* Call the module. */
+            PFNCMENTRY pfnEntry = (PFNCMENTRY)CM_FLAT_BINARY_LOAD_ADDR;
+            uint32_t u32CmRet = pfnEntry(&CmExec.CmIf, u32Arg0, u32Arg1, u32Arg2, u32Arg3);
+
+            /* The code moudle finished, send the notification. */
+            PSPSERIALEXECCMFINISHEDNOT ExecFinishedNot;
+            ExecFinishedNot.u32CmRet = u32CmRet;
+            ExecFinishedNot.u32Pad0  = 0;
+            rc = pspStubPduSend(pThis, rc, 0 /*idCcd*/, PSPSERIALPDURRNID_NOTIFICATION_CODE_MOD_EXEC_FINISHED, &ExecFinishedNot, sizeof(ExecFinishedNot));
+        }
+    }
+    else
+        rc = pspStubPduSend(pThis, ERR_INVALID_PARAMETER, 0 /*idCcd*/, PSPSERIALPDURRNID_RESPONSE_EXEC_CODE_MOD, NULL /*pvRespPayload*/, 0 /*cbRespPayload*/);
+
+    return rc;
+}
+
+
+/**
  * Processes the given PDU.
  *
  * @returns Status code.
@@ -1218,6 +1573,15 @@ static int pspStubPduProcess(PPSPSTUBSTATE pThis, PCPSPSERIALPDUHDR pPdu)
             break;
         case PSPSERIALPDURRNID_REQUEST_PSP_X86_MMIO_WRITE:
             rc = pspStubPduProcessPspX86MmioXfer(pThis, (pPdu + 1), pPdu->u.Fields.cbPdu, true /*fWrite*/);
+            break;
+        case PSPSERIALPDURRNID_REQUEST_INPUT_BUF_WRITE:
+            rc = pspStubPduProcessInputBufWrite(pThis, (pPdu + 1), pPdu->u.Fields.cbPdu);
+            break;
+        case PSPSERIALPDURRNID_REQUEST_LOAD_CODE_MOD:
+            rc = pspStubPduProcessLoadCodeMod(pThis, (pPdu + 1), pPdu->u.Fields.cbPdu);
+            break;
+        case PSPSERIALPDURRNID_REQUEST_EXEC_CODE_MOD:
+            rc = pspStubPduProcessExecCodeMod(pThis, (pPdu + 1), pPdu->u.Fields.cbPdu);
             break;
         default:
             /* Should never happen as the ID was already checked during PDU validation. */
@@ -1452,13 +1816,7 @@ static int pspStubMainloop(PPSPSTUBSTATE pThis)
 
         /* Connected, main PDU receive function. */
         for (;;)
-        {
-            PCPSPSERIALPDUHDR pPdu;
-
-            rc = pspStubPduRecv(pThis, &pPdu, PSP_SERIAL_STUB_INDEFINITE_WAIT);
-            if (!rc)
-                rc = pspStubPduProcess(pThis, pPdu);
-        }
+            pspStubPduRecvProcessSingle(pThis, PSP_SERIAL_STUB_INDEFINITE_WAIT);
     }
 
     LogRel("pspStubMainloop: Exiting with %d\n", rc);
