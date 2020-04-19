@@ -1,5 +1,5 @@
 CROSS_COMPILE=arm-none-eabi-
-CFLAGS=-O0 -DIN_PSP -g -I../include -I../Lib/include -std=gnu99 -fomit-frame-pointer -nostartfiles -ffreestanding -Wextra -Werror -march=armv7ve
+CFLAGS=-O2 -DIN_PSP -g -I../include -I../Lib/include -std=gnu99 -fomit-frame-pointer -nostartfiles -ffreestanding -Wextra -Werror -march=armv7ve -mthumb
 VPATH=../Lib/src
 
 OBJS = main.o string.o log.o tm.o uart.o pdu-transp-uart.o pdu-transp-spi-flash.o pdu-transp-spi-em100.o
@@ -22,7 +22,7 @@ main.o: main.c
 	$(CROSS_COMPILE)gcc $(CFLAGS) -c -o $@ main.c
 
 psp-serial-stub.elf : ../build/svc-linker.ld _svc-start.o $(OBJS)
-	$(CROSS_COMPILE)ld -T $^ -o $@
+	$(CROSS_COMPILE)ld -Map=psp-serial-stub.map -T $^ -o $@
 
 psp-serial-stub.raw: psp-serial-stub.elf
 	$(CROSS_COMPILE)objcopy -O binary $^ $@
