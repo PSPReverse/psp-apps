@@ -1097,7 +1097,31 @@ int pspStubCmIfInBufRead(PCCMIF pCmIf, uint32_t idInBuf, void *pvBuf, size_t cbR
         {
             /* Loop until we've read all requested data. */
             uint8_t *pbBuf = (uint8_t *)pvBuf;
-            
+
+            do
+            {
+                rc = pspStubCmIfInBufPoll(pCmIf, idInBuf, CM_WAIT_INDEFINITE);
+                if (!rc)
+                {
+                    size_t cbThisRead = MIN(cbRead, pInBuf->offInBuf);
+
+                    memcpy(pbBuf, pInBuf->pvInBuf, cbThisRead);
+                    if (cbThisRead < pInBuf->offInBuf)
+                    {
+                        uint8_t *pbInBuf = (uint8_t *)pInBuf->pvInBuf;
+                        size_t cbLeft = pInBuf->offInBuf - cbThisRead;
+
+                        /* Move everything to the front. */
+                        for (uint32_t i = 0; i < cbLeft; i++)
+                            pbInBuf[i] = pbInBuf[cbThisRead + i];
+                    }
+
+                    pInBuf->offInBuf -= cbThisRead;
+                    pbBuf            += cbThisRead;
+                    cbRead           -= cbThisRead;
+                }
+            } while (   !rc
+                     && cbRead);
         }
     }
     else
@@ -1477,6 +1501,7 @@ static int pspStubPduProcessLoadCodeMod(PPSPSTUBSTATE pThis, const void *pvPaylo
             pInBuf->pvInBuf  = (void *)CM_FLAT_BINARY_LOAD_ADDR;
             pInBuf->cbInBuf  = 0x3f000 - CM_FLAT_BINARY_LOAD_ADDR;
             pInBuf->offInBuf = 0;
+            memset(pInBuf->pvInBuf, 0, pInBuf->cbInBuf);
         }
         else
             rc = ERR_NOT_IMPLEMENTED;
@@ -1522,6 +1547,12 @@ static int pspStubPduProcessExecCodeMod(PPSPSTUBSTATE pThis, const void *pvPaylo
             CmExec.CmIf.pfnOutBufWrite = pspStubCmIfOutBufWriteAsm;
             CmExec.CmIf.pfnDelayMs     = pspStubCmIfDelayMsAsm;
             CmExec.CmIf.pfnTsGetMilli  = pspStubCmIfTsGetMilliAsm;
+
+            /* Reset the stdin buffer. */
+            PPSPINBUF pInBuf = &pThis->aInBufs[0];
+            pInBuf->pvInBuf  = &pThis->abScratch[0];
+            pInBuf->cbInBuf  = sizeof(pThis->abScratch);
+            pInBuf->offInBuf = 0;
 
             /* Call the module. */
             PFNCMENTRY pfnEntry = (PFNCMENTRY)CM_FLAT_BINARY_LOAD_ADDR;
