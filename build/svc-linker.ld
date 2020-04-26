@@ -56,5 +56,7 @@ SECTIONS
         . += 0x200;
         SCRATCH_STACK_TOP_FIQ = .;
     } > RAM
+
+    _ram_end = ORIGIN(RAM) + LENGTH(RAM);
 }
 
