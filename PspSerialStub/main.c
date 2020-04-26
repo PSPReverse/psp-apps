@@ -172,15 +172,25 @@ typedef struct PSPSTUBSTATE
     size_t                      cbPduRecvLeft;
     /** Current offset into the PDU buffer. */
     uint32_t                    offPduRecv;
-    /** The PDU receive buffer. */
-    uint8_t                     abPdu[_4K];
     /** Input buffer related state. */
     PSPINBUF                    aInBufs[2];
+    /** Align following buffers on 16byte boundary. */
+    uint64_t                    u64Pad0;
+    /** The PDU receive buffer. */
+    uint8_t                     abPdu[_4K];
+    /** The PDU response buffer. */
+    uint8_t                     abPduResp[_4K];
     /** Scratch space. */
-    uint8_t                     abScratch[16 * _1K]; /** @todo Check alignment on 8 byte boundary. */
+    uint8_t                     abScratch[16 * _1K];
 } PSPSTUBSTATE;
 /** Pointer to the binary loader state. */
 typedef PSPSTUBSTATE *PPSPSTUBSTATE;
+
+#ifdef __GNUC__
+_Static_assert((__builtin_offsetof(PSPSTUBSTATE, abPdu) & 0xf) == 0);
+_Static_assert((__builtin_offsetof(PSPSTUBSTATE, abPduResp) & 0xf) == 0);
+_Static_assert((__builtin_offsetof(PSPSTUBSTATE, abScratch) & 0xf) == 0);
+#endif
 
 
 /**
@@ -200,9 +210,11 @@ typedef const CMEXEC *PCCMEXEC;
 
 
 #define PSP_SERIAL_STUB_EARLY_SPI_LOG_OFF 0x0
+/** Every PSP gets 1MB for the log buffer in the SPI flash. */
+#define PSP_SERIAL_STUB_EARLY_SPI_LOG_SZ  (1024*1024)
 
 /** The global stub state. */
-static PSPSTUBSTATE g_StubState;
+static PSPSTUBSTATE g_StubState __attribute__ ((aligned (16)));
 static uint32_t off = 0;
 
 
@@ -1307,11 +1319,7 @@ static int pspStubPduProcessPspSmnXfer(PPSPSTUBSTATE pThis, const void *pvPayloa
 {
     PCPSPSERIALSMNMEMXFERREQ pReq = (PCPSPSERIALSMNMEMXFERREQ)pvPayload;
 
-    if (   cbPayload < sizeof(*pReq)
-        || (   pReq->cbXfer != 1
-            && pReq->cbXfer != 2
-            && pReq->cbXfer != 4
-            && pReq->cbXfer != 8))
+    if (cbPayload < sizeof(*pReq))
         return ERR_INVALID_PARAMETER;
 
     PSPSERIALPDURRNID enmResponse =   fWrite
@@ -1324,15 +1332,33 @@ static int pspStubPduProcessPspSmnXfer(PPSPSTUBSTATE pThis, const void *pvPayloa
         const void *pvRespPayload = NULL;
         uint8_t abRead[8];
         size_t cbResPayload = 0;
-        const void *pvSrc = NULL;
-        void *pvDst = NULL;
-        if (fWrite)
-            pspStubMmioAccess(pvMap, (pReq + 1), pReq->cbXfer);
+
+        if (   pReq->cbXfer == 1
+            || pReq->cbXfer == 2
+            || pReq->cbXfer == 4)
+        {
+            if (fWrite)
+                pspStubMmioAccess(pvMap, (pReq + 1), pReq->cbXfer);
+            else
+            {
+                pspStubMmioAccess(&abRead[0], pvMap, pReq->cbXfer);
+                pvRespPayload = &abRead[0];
+                cbResPayload  = pReq->cbXfer;
+            }
+        }
         else
         {
-            pspStubMmioAccess(&abRead[0], pvMap, pReq->cbXfer);
-            pvRespPayload = &abRead[0];
-            cbResPayload  = pReq->cbXfer;
+            if (fWrite)
+            {
+                const void *pvSrc = (pReq + 1);
+                memcpy(pvMap, pvSrc, pReq->cbXfer);
+            }
+            else
+            {
+                memcpy(&pThis->abPduResp[0], pvMap, pReq->cbXfer);
+                pvRespPayload = &pThis->abPduResp[0];
+                cbResPayload  = pReq->cbXfer;
+            }
         }
 
         rc = pspStubPduSend(pThis, INF_SUCCESS, 0 /*idCcd*/, enmResponse, pvRespPayload, cbResPayload);
