@@ -37,7 +37,7 @@ _start:
   ldr r0, =BSS_START
   mov r1, #0
   ldr r2, =BSS_END
-  sub r2, r2, r1
+  sub r2, r2, r0
   blx memset                        /* Clear BSS section. */
   blx main
 
