@@ -45,6 +45,8 @@
 
 
 #define PSP_SPI_MASTER_CHUNK_SZ         64
+/** Upload FIFO size of the Dediprog EM100 in bytes. */
+#define EM100_UFIFO_SZ                 512
 
 /**
  * SPI flash transport channel.
@@ -265,6 +267,24 @@ static int pspStubEm100UFifoQueryUsed(PPSPPDUTRANSPINT pThis, size_t *pcbUsed)
 
 
 /**
+ * Queries the number of bytes free in the uFIFO.
+ *
+ * @returns Status code.
+ * @param   pThis               The EM100 transport channel instance.
+ * @param   pcbUsed             Where to store the number of bytes free on success.
+ */
+static int pspStubEm100UFifoQueryFree(PPSPPDUTRANSPINT pThis, size_t *pcbFree)
+{
+    size_t cbUsed = 0;
+    int rc = pspStubEm100UFifoQueryUsed(pThis, &cbUsed);
+    if (!rc)
+        *pcbFree = EM100_UFIFO_SZ - cbUsed;
+
+    return rc;
+}
+
+
+/**
  * Queries the number of bytes available in the dFIFO.
  *
  * @returns Status code.
@@ -360,12 +380,24 @@ static int pspStubEm100TranspWrite(PSPPDUTRANSP hPduTransp, const void *pvBuf, s
     while (   cbWrite
            && rc == INF_SUCCESS)
     {
-        size_t cbThisWrite = MIN(cbWrite, PSP_SPI_MASTER_CHUNK_SZ);
-        rc = pspStubEm100UFifoWrite(pThis, pbBuf, cbThisWrite);
+        size_t cbFree = 0;
+        rc = pspStubEm100UFifoQueryFree(pThis, &cbFree);
         if (!rc)
         {
-            pbBuf   += cbThisWrite;
-            cbWrite -= cbThisWrite;
+            if (cbFree)
+            {
+                size_t cbThisWrite = MIN(cbWrite, PSP_SPI_MASTER_CHUNK_SZ);
+                cbThisWrite = MIN(cbThisWrite, cbFree);
+
+                rc = pspStubEm100UFifoWrite(pThis, pbBuf, cbThisWrite);
+                if (!rc)
+                {
+                    pbBuf   += cbThisWrite;
+                    cbWrite -= cbThisWrite;
+                }
+            }
+            else
+                pspSerialStubDelayMs(1); /* Wait for a moment to let the host empty the uFIFO. */
         }
     }
 
