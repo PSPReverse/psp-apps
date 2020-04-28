@@ -703,10 +703,13 @@ static int pspStubPduSend2(PPSPSTUBSTATE pThis, int32_t rcReq, uint32_t idCcd, P
 {
     PSPSERIALPDUHDR PduHdr;
     PSPSERIALPDUFOOTER PduFooter;
+    uint8_t abPad[7] = { 0 };
+    size_t cbPayload = cbPayload1 + cbPayload2;
+    size_t cbPad = ((cbPayload + 7) & ~7) - cbPayload; /* Pad the payload to an 8 byte alignment so the footer is properly aligned. */
 
     /* Initialize header and footer. */
     PduHdr.u32Magic           = PSP_SERIAL_PSP_2_EXT_PDU_START_MAGIC;
-    PduHdr.u.Fields.cbPdu     = cbPayload1 + cbPayload2;
+    PduHdr.u.Fields.cbPdu     = cbPayload;
     PduHdr.u.Fields.cPdus     = ++pThis->cPdusSent;
     PduHdr.u.Fields.enmRrnId  = enmPduRrnId;
     PduHdr.u.Fields.idCcd     = idCcd;
@@ -725,6 +728,8 @@ static int pspStubPduSend2(PPSPSTUBSTATE pThis, int32_t rcReq, uint32_t idCcd, P
     for (size_t i = 0; i < cbPayload2; i++)
         uChkSum += pbPayload[i];
 
+    /* The padding needs no checksum during generation as it is always 0. */
+
     PduFooter.u32ChkSum = (0xffffffff - uChkSum) + 1;
     PduFooter.u32Magic  = PSP_SERIAL_PSP_2_EXT_PDU_END_MAGIC;
 
@@ -735,6 +740,8 @@ static int pspStubPduSend2(PPSPSTUBSTATE pThis, int32_t rcReq, uint32_t idCcd, P
         rc = pspStubTranspWrite(pThis, pvPayload1, cbPayload1);
     if (!rc && pvPayload2 && cbPayload2)
         rc = pspStubTranspWrite(pThis, pvPayload2, cbPayload2);
+    if (!rc && cbPad)
+        rc = pspStubTranspWrite(pThis, &abPad[0], cbPad);
     if (!rc)
         rc = pspStubTranspWrite(pThis, &PduFooter, sizeof(PduFooter));
     pspStubTranspEnd(pThis);
@@ -809,12 +816,14 @@ static int pspStubPduHdrValidate(PPSPSTUBSTATE pThis, PCPSPSERIALPDUHDR pHdr)
 static int pspStubPduValidate(PPSPSTUBSTATE pThis, PCPSPSERIALPDUHDR pHdr)
 {
     uint32_t uChkSum = 0;
+    size_t cbPad = ((pHdr->u.Fields.cbPdu + 7) & ~7) - pHdr->u.Fields.cbPdu;
 
     for (uint32_t i = 0; i < ELEMENTS(pHdr->u.ab); i++)
         uChkSum += pHdr->u.ab[i];
 
+    /* Verify padding is all 0 by including it in the checksum. */
     uint8_t *pbPayload = (uint8_t *)(pHdr + 1);
-    for (uint32_t i = 0; i < pHdr->u.Fields.cbPdu; i++)
+    for (uint32_t i = 0; i < pHdr->u.Fields.cbPdu + cbPad; i++)
         uChkSum += *pbPayload++;
 
     /* Check whether the footer magic and checksum are valid. */
@@ -853,8 +862,9 @@ static int pspStubPduRecvAdvance(PPSPSTUBSTATE pThis, PCPSPSERIALPDUHDR *ppPduRc
                 /* No payload means going directly to the footer. */
                 if (pHdr->u.Fields.cbPdu)
                 {
+                    size_t cbPad = ((pHdr->u.Fields.cbPdu + 7) & ~7) - pHdr->u.Fields.cbPdu;
                     pThis->enmPduRecvState = PSPSERIALPDURECVSTATE_PAYLOAD;
-                    pThis->cbPduRecvLeft   = pHdr->u.Fields.cbPdu;
+                    pThis->cbPduRecvLeft   = pHdr->u.Fields.cbPdu + cbPad;
                 }
                 else
                 {
