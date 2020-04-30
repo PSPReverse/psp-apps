@@ -1480,6 +1480,207 @@ static int pspStubPduProcessPspX86MmioXfer(PPSPSTUBSTATE pThis, const void *pvPa
 
 
 /**
+ * Maps the given address from the data xfer request start address.
+ *
+ * @returns Status code.
+ * @param   pThis                   The serial stub instance data.
+ * @param   pReq                    The data xfer request.
+ * @param   ppv                     Where to store the pointer to the mapping on success.
+ */
+static int pspStubPduDataXferAddressMap(PPSPSTUBSTATE pThis, PCPSPSERIALDATAXFERREQ pReq, void **ppv)
+{
+    int rc = 0;
+
+    switch (pReq->enmAddrSpace)
+    {
+        case PSPADDRSPACE_PSP_MEM:
+        case PSPADDRSPACE_PSP_MMIO:
+            *ppv = (void *)pReq->u.PspAddrStart;
+            break;
+        case PSPADDRSPACE_SMN:
+            rc = pspStubSmnMap(pThis, pReq->u.SmnAddrStart, ppv);
+            break;
+        case PSPADDRSPACE_X86_MEM:
+            rc = pspStubX86PhysMap(pThis, pReq->u.X86.PhysX86AddrStart, false /*fMmio*/, ppv);
+            /** @todo Caching flags. */
+            break;
+        case PSPADDRSPACE_X86_MMIO:
+            rc = pspStubX86PhysMap(pThis, pReq->u.X86.PhysX86AddrStart, true /*fMmio*/, ppv);
+            /** @todo Caching flags. */
+            break;
+        default:
+            rc = -1;
+            break;
+    }
+
+    return rc;
+}
+
+
+/**
+ * Unmaps the given pointer returned by a previous call to pspStubPduDataXferAddressMap().
+ *
+ * @returns nothing.
+ * @param   pThis                   The serial stub instance data.
+ * @param   pReq                    The data xfer request.
+ * @param   pv                      Pointer to the address to unmap.
+ */
+static void pspStubPduDataXferAddressUnmapByPtr(PPSPSTUBSTATE pThis, PCPSPSERIALDATAXFERREQ pReq, void *pv)
+{
+    switch (pReq->enmAddrSpace)
+    {
+        case PSPADDRSPACE_PSP_MEM:
+        case PSPADDRSPACE_PSP_MMIO:
+            break;
+        case PSPADDRSPACE_SMN:
+            pspStubSmnUnmapByPtr(pThis, pv);
+            break;
+        case PSPADDRSPACE_X86_MEM:
+        case PSPADDRSPACE_X86_MMIO:
+            pspStubX86PhysUnmapByPtr(pThis, pv);
+            break;
+        default:
+            break;
+    }
+}
+
+
+/**
+ * Memset operation with a single value.
+ *
+ * @returns nothing.
+ * @param   pThis                   The serial stub instance data.
+ * @param   pReq                    The data xfer request.
+ * @param   pv                      The mapped address.
+ */
+static void pspStubPduDataXferMemset(PPSPSTUBSTATE pThis, PCPSPSERIALDATAXFERREQ pReq, void *pv)
+{
+    void *pvVal = (void *)(pReq + 1);
+    size_t cbWrLeft = pReq->cbXfer;
+    size_t cbStride = pReq->cbStride;
+    bool fIncrAddr = (pReq->fFlags & PSP_SERIAL_DATA_XFER_F_INCR_ADDR) ? true : false;
+
+    uint8_t *pb = (uint8_t *)pv;
+    while (cbWrLeft)
+    {
+        pspStubMmioAccess(pb, pvVal, cbStride);
+        if (fIncrAddr)
+            pb += cbStride;
+
+        cbWrLeft -= cbStride;
+    }
+}
+
+
+/**
+ * Reads from the given PSP mapping into the supplied buffer.
+ *
+ * @returns nothing.
+ * @param   pThis                   The serial stub instance data.
+ * @param   pReq                    The data xfer request.
+ * @param   pvSrc                   The mapped address to read from.
+ * @param   pvDst                   Where to store the read data.
+ */
+static void pspStubPduDataXferRead(PPSPSTUBSTATE pThis, PCPSPSERIALDATAXFERREQ pReq, const void *pvSrc, void *pvDst)
+{
+    void *pvVal = (void *)(pReq + 1);
+    size_t cbRdLeft = pReq->cbXfer;
+    size_t cbStride = pReq->cbStride;
+    bool fIncrAddr = (pReq->fFlags & PSP_SERIAL_DATA_XFER_F_INCR_ADDR) ? true : false;
+
+    uint8_t *pbDst = (uint8_t *)pvDst;
+    uint8_t *pbSrc = (uint8_t *)pvSrc;
+    while (cbRdLeft)
+    {
+        pspStubMmioAccess(pbDst, pbSrc, cbStride);
+        if (fIncrAddr)
+            pbSrc += cbStride;
+
+        pbDst    += cbStride;
+        cbRdLeft -= cbStride;
+    }
+}
+
+
+/**
+ * Writes to the given PSP mapping from the supplied buffer.
+ *
+ * @returns nothing.
+ * @param   pThis                   The serial stub instance data.
+ * @param   pReq                    The data xfer request.
+ * @param   pvDst                   The mapped address to write to.
+ * @param   pvSrc                   The data to write.
+ */
+static void pspStubPduDataXferWrite(PPSPSTUBSTATE pThis, PCPSPSERIALDATAXFERREQ pReq, void *pvDst, const void *pvSrc)
+{
+    void *pvVal = (void *)(pReq + 1);
+    size_t cbWrLeft = pReq->cbXfer;
+    size_t cbStride = pReq->cbStride;
+    bool fIncrAddr = (pReq->fFlags & PSP_SERIAL_DATA_XFER_F_INCR_ADDR) ? true : false;
+
+    uint8_t *pbDst = (uint8_t *)pvDst;
+    uint8_t *pbSrc = (uint8_t *)pvSrc;
+    while (cbWrLeft)
+    {
+        pspStubMmioAccess(pbDst, pbSrc, cbStride);
+        if (fIncrAddr)
+            pbDst += cbStride;
+
+        pbSrc    += cbStride;
+        cbWrLeft -= cbStride;
+    }
+}
+
+
+/**
+ * Extended data transfer mechanism.
+ *
+ * @returns Stauts code.
+ * @param   pThis                   The serial stub instance data.
+ * @param   pvPayload               PDU payload.
+ * @param   cbPayload               Payload size in bytes.
+ */
+static int pspStubPduProcessDataXfer(PPSPSTUBSTATE pThis, const void *pvPayload, size_t cbPayload)
+{
+    PCPSPSERIALDATAXFERREQ pReq = (PCPSPSERIALDATAXFERREQ)pvPayload;
+
+    if (   cbPayload < sizeof(*pReq)
+        || (   pReq->cbStride != 1
+            && pReq->cbStride != 2
+            && pReq->cbStride != 4))
+        return ERR_INVALID_PARAMETER;
+
+    PSPSERIALPDURRNID enmResponse = PSPSERIALPDURRNID_RESPONSE_PSP_DATA_XFER;
+    void *pvMap = NULL;
+    int rc = pspStubPduDataXferAddressMap(pThis, pReq, &pvMap);
+    if (!rc)
+    {
+        void *pvRespPayload = NULL;
+        size_t cbResPayload = 0;
+
+        if (pReq->fFlags & PSP_SERIAL_DATA_XFER_F_MEMSET)
+            pspStubPduDataXferMemset(pThis, pReq, pvMap);
+        else if (pReq->fFlags & PSP_SERIAL_DATA_XFER_F_READ)
+        {
+            pvRespPayload = &pThis->abPduResp[0];
+            cbResPayload  = pReq->cbXfer;
+
+            pspStubPduDataXferRead(pThis, pReq, pvMap, pvRespPayload);
+        }
+        else if (pReq->fFlags & PSP_SERIAL_DATA_XFER_F_WRITE)
+            pspStubPduDataXferWrite(pThis, pReq, pvMap, (void *)(pReq + 1));
+
+        rc = pspStubPduSend(pThis, INF_SUCCESS, 0 /*idCcd*/, enmResponse, pvRespPayload, cbResPayload);
+        pspStubPduDataXferAddressUnmapByPtr(pThis, pReq, pvMap);
+    }
+    else
+        rc = pspStubPduSend(pThis, rc, 0 /*idCcd*/, enmResponse, NULL /*pvRespPayload*/, 0 /*cbRespPayload*/);
+
+    return rc;
+}
+
+
+/**
  * Writes to the given input buffer.
  *
  * @returns Status code.
@@ -1650,6 +1851,9 @@ static int pspStubPduProcess(PPSPSTUBSTATE pThis, PCPSPSERIALPDUHDR pPdu)
             break;
         case PSPSERIALPDURRNID_REQUEST_PSP_X86_MMIO_WRITE:
             rc = pspStubPduProcessPspX86MmioXfer(pThis, (pPdu + 1), pPdu->u.Fields.cbPdu, true /*fWrite*/);
+            break;
+        case PSPSERIALPDURRNID_RESPONSE_PSP_DATA_XFER:
+            rc = pspStubPduProcessDataXfer(pThis, (pPdu + 1), pPdu->u.Fields.cbPdu);
             break;
         case PSPSERIALPDURRNID_REQUEST_INPUT_BUF_WRITE:
             rc = pspStubPduProcessInputBufWrite(pThis, (pPdu + 1), pPdu->u.Fields.cbPdu);
