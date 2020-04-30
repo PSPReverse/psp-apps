@@ -1852,7 +1852,7 @@ static int pspStubPduProcess(PPSPSTUBSTATE pThis, PCPSPSERIALPDUHDR pPdu)
         case PSPSERIALPDURRNID_REQUEST_PSP_X86_MMIO_WRITE:
             rc = pspStubPduProcessPspX86MmioXfer(pThis, (pPdu + 1), pPdu->u.Fields.cbPdu, true /*fWrite*/);
             break;
-        case PSPSERIALPDURRNID_RESPONSE_PSP_DATA_XFER:
+        case PSPSERIALPDURRNID_REQUEST_PSP_DATA_XFER:
             rc = pspStubPduProcessDataXfer(pThis, (pPdu + 1), pPdu->u.Fields.cbPdu);
             break;
         case PSPSERIALPDURRNID_REQUEST_INPUT_BUF_WRITE:
