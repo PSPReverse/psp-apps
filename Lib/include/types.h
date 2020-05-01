@@ -24,4 +24,19 @@
 
 #include <common/types.h>
 
+/**
+ * IRQ exception frame.
+ */
+typedef struct PSPIRQREGFRAME
+{
+    /** Saved GPRs. */
+    uint32_t                    aGprs[13];
+    /** SPSR register */
+    uint32_t                    uRegSpsr;
+    /** LR register. */
+    uint32_t                    uRegLr;
+} PSPIRQREGFRAME;
+/** Pointer to the IRQ exception frame. */
+typedef PSPIRQREGFRAME *PPSPIRQREGFRAME;
+
 #endif

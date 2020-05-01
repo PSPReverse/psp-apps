@@ -160,6 +160,10 @@ typedef struct PSPSTUBSTATE
     void                        *pvEarlySpiLog;
     /** Flag whether logging is enabled at all currently. */
     bool                        fLogEnabled;
+    /** Flag whether an IRQ is pending for servicing. */
+    bool                        fIrqPending;
+    /** Flag whether an IRQ notification was sent. */
+    bool                        fIrqNotificationSent;
     /** Number of beacons sent. */
     uint32_t                    cBeaconsSent;
     /** Number of PDUs sent so far. */
@@ -239,6 +243,7 @@ extern void pspStubCmIfDelayMsAsm(PCCMIF pCmIf, uint32_t cMillies);
 extern uint32_t pspStubCmIfTsGetMilliAsm(PCCMIF pCmIf);
 
 static int pspStubPduProcess(PPSPSTUBSTATE pThis, PCPSPSERIALPDUHDR pPdu);
+static void pspStubIrqProcess(PPSPSTUBSTATE pThis);
 
 
 /**
@@ -968,6 +973,12 @@ static int pspStubPduRecv(PPSPSTUBSTATE pThis, PCPSPSERIALPDUHDR *ppPduRcvd, uin
 
     do
     {
+        /*
+         * Check for pending interrupts and send a notification (needs to be done here
+         * as this is the core runloop during PDU processing and when code modules are executed).
+         */
+        pspStubIrqProcess(pThis);
+
         size_t cbAvail = pspStubTranspPeek(pThis);
         if (cbAvail)
         {
@@ -1916,6 +1927,55 @@ static int pspStubPduProcess(PPSPSTUBSTATE pThis, PCPSPSERIALPDUHDR pPdu)
 }
 
 
+/**
+ * Enables interrupts of the PSP again.
+ *
+ * @returns nothing.
+ */
+static inline void pspStubIrqEnable(void)
+{
+    asm volatile("dsb #0xf\n"
+                 "isb #0xf\n"
+                 "cpsie i\n": : :"memory");
+}
+
+
+/**
+ * Processes pending interrupts sending a notification.
+ *
+ * @returns nothing.
+ * @param   pThis                   The serial stub instance data.
+ */
+static void pspStubIrqProcess(PPSPSTUBSTATE pThis)
+{
+    if (pThis->fIrqPending)
+    {
+        if (!pThis->fIrqNotificationSent)
+        {
+            LogRel("pspStubIrqProcess: New IRQ is pending, sending notification!\n");
+            pThis->fIrqNotificationSent = true;
+            int rc = pspStubPduSend(pThis, INF_SUCCESS, 0 /*idCcd*/, PSPSERIALPDURRNID_NOTIFICATION_IRQ, NULL /*pvRespPayload*/, 0 /*cbRespPayload*/);
+            if (rc)
+                LogRel("pspStubIrqProcess: Sending IRQ notification failed with %d!\n", rc); /* Probably fails to but who cares at this point. */
+        }
+        else
+        {
+            /** @todo Possible race here. */
+            /* Check the IRQ pending register whether all IRQs were processed and re-enable interrupts in that case. */
+            uint32_t uIrqPending = *(volatile uint32_t *)0x030103c0;
+            if (uIrqPending != 0)
+            {
+                /* Nothing pending anymore, re-enable interrupts. */
+                LogRel("pspStubIrqProcess: Interrupts processed, re-enable IRQs\n");
+                pThis->fIrqPending          = false;
+                pThis->fIrqNotificationSent = false;
+                pspStubIrqEnable();
+            }
+        }
+    }
+}
+
+
 static void pspStubMmioWrU32(PSPADDR PspAddrMmio, uint32_t uVal)
 {
     pspStubMmioAccess((void *)PspAddrMmio, &uVal, sizeof(uint32_t));
@@ -2226,10 +2286,15 @@ void ExcpDataAbrt(void)
 }
 
 
-void ExcpIrq(void)
+void ExcpIrq(PPSPIRQREGFRAME pRegFrame)
 {
-    LogRel("ExcpIrq:\n");
-    for (;;);
+    /*
+     * Set the interrupt pending global flag and disable interrupts
+     * in the SPSR.
+     */
+    g_StubState.fIrqPending          = true;
+    g_StubState.fIrqNotificationSent = false;
+    pRegFrame->uRegSpsr |= (1 << 7) | (1 << 6);
 }
 
 
@@ -2249,6 +2314,7 @@ void main(void)
 
     pThis->cCcds                       = 1; /** @todo Determine the amount of available CCDs (can't be read from boot ROM service page at all times) */
     pThis->fConnected                  = false;
+    pThis->fIrqPending                 = false;
 #ifdef PSP_SERIAL_STUB_SPI_MSG_CHAN
     pThis->fSpiMsgChan                 = true;
     pThis->fEarlyLogOverSpi            = false;
