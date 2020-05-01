@@ -32,7 +32,7 @@
  */
 static void tmRunSlots(PTM pTm)
 {
-    uint32_t cMillies = pTm->cMillies;
+    uint32_t cMillies = TMGetMillies(pTm);
 
     for (unsigned i = 0; i < pTm->cTimerCallbacks; i++)
     {
@@ -50,7 +50,7 @@ static void tmRunSlots(PTM pTm)
 
 int TMInit(PTM pTm)
 {
-    pTm->cMillies = 0;
+    pTm->cMicroSec = 0;
     pTm->cTimerCallbacks = 0;
 
     for (unsigned i = 0; i < TM_TIMER_CALLBACK_SLOT_COUNT; i++)
@@ -68,18 +68,26 @@ int TMInit(PTM pTm)
 
 void TMTick(PTM pTm)
 {
-    pTm->cMillies++;
+    pTm->cMicroSec++;
 
     /* Check for expired timers. */
     tmRunSlots(pTm);
 }
 
-void TMTickMultiple(PTM pTm, uint32_t cMillies)
+void TMTickMultiple(PTM pTm, uint64_t cMicroSecs)
 {
-    pTm->cMillies += cMillies;
+    pTm->cMicroSec += cMicroSecs;
 
     /* Check for expired timers. */
     tmRunSlots(pTm);
+}
+
+uint64_t TMGetMicros(PTM pTm)
+{
+    if (!pTm)
+        return 0;
+
+    return pTm->cMicroSec;
 }
 
 uint32_t TMGetMillies(PTM pTm)
@@ -87,25 +95,40 @@ uint32_t TMGetMillies(PTM pTm)
     if (!pTm)
         return 0;
 
-    return pTm->cMillies;
+    return (uint32_t)(pTm->cMicroSec / 1000);
 }
 
 void TMDelayMillies(PTM pTm, uint32_t cMillies)
 {
     uint32_t msStart, msEnd;
 
-    msStart = pTm->cMillies;
+    msStart = TMGetMillies(pTm);
     msEnd = msStart + cMillies;
-
-    //Log("%s: %u %u\n", __FUNCTION__, msEnd, pTm->cMillies);
 
     if (msStart < msEnd)
     {
-        while ( (pTm->cMillies >= msStart) && (pTm->cMillies < msEnd));
+        while ( (TMGetMillies(pTm) >= msStart) && (TMGetMillies(pTm) < msEnd));
     }
     else
     {
-        while ( (pTm->cMillies >= msStart) || (pTm->cMillies < msEnd));
+        while ( (TMGetMillies(pTm) >= msStart) || (TMGetMillies(pTm) < msEnd));
+    }
+}
+
+void TMDelayMicros(PTM pTm, uint64_t cMicros)
+{
+    uint64_t tsStart, tsEnd;
+
+    tsStart = TMGetMicros(pTm);
+    tsEnd = tsStart + cMicros;
+
+    if (tsStart < tsEnd)
+    {
+        while ( (TMGetMicros(pTm) >= tsStart) && (TMGetMicros(pTm) < tsEnd));
+    }
+    else
+    {
+        while ( (TMGetMicros(pTm) >= tsStart) || (TMGetMicros(pTm) < tsEnd));
     }
 }
 
@@ -137,7 +160,7 @@ int TMCallbackSetExpirationAbsolute(PTM pTm, PTMCLBKSLOT pTmSlot, uint32_t cMill
 
 int TMCallbackSetExpirationRelative(PTM pTm, PTMCLBKSLOT pTmSlot, uint32_t cMillies)
 {
-    pTmSlot->cMilliesNext = pTm->cMillies + cMillies;
+    pTmSlot->cMilliesNext = TMGetMillies(pTm) + cMillies;
     return INF_SUCCESS;
 }
 

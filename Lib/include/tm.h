@@ -75,10 +75,12 @@ typedef struct TMCLBKSLOT
  */
 typedef struct TM
 {
-    /** Current millisecond count. */
-    volatile uint32_t cMillies;
+    /** Current microsecond count. */
+    volatile uint64_t cMicroSec;
     /** Number of timer callbacks registered. */
     volatile uint32_t cTimerCallbacks;
+    /** Padding. */
+    uint32_t          u32Pad0;
     /** Array of timer callbacks. */
     TMCLBKSLOT        aClbkSlots[TM_TIMER_CALLBACK_SLOT_COUNT];
 } TM;
@@ -96,7 +98,7 @@ int TMInit(PTM pTm);
  * Advances the clock of the timekeeping manager by one tick and
  * calls all expired callbacks.
  *
- * @note: This should be called every millisecond to get an accurate time source.
+ * @note: This should be called every microsecond to get an accurate time source.
  *
  * @returns nothing.
  * @param   pTm    The timekeeping manager to use.
@@ -108,12 +110,20 @@ void TMTick(PTM pTm);
  * calls all expired callbacks.
  *
  * @returns nothing.
- * @param   pTm      The timekeeping manager to use.
- * @param   cMillies Number of milliseconds to advance the clock.
+ * @param   pTm        The timekeeping manager to use.
+ * @param   cMicroSecs Number of microseconds to advance the clock.
  *
  * @note Timers are only run once after the milliseconds where updated.
  */
-void TMTickMultiple(PTM pTm, uint32_t cMillies);
+void TMTickMultiple(PTM pTm, uint64_t cMicroSecs);
+
+/**
+ * Return the current microseconds value since the clock started ticking.
+ *
+ * @returns Number of microseconds since the clock started.
+ * @param   pTm    The timekeeping manager to use.
+ */
+uint64_t TMGetMicros(PTM pTm);
 
 /**
  * Return the current milliseconds value since the clock started ticking.
@@ -131,6 +141,15 @@ uint32_t TMGetMillies(PTM pTm);
  * @param   cMillies Amount of milliseconds to delay.
  */
 void TMDelayMillies(PTM pTm, uint32_t cMillies);
+
+/**
+ * Delay execution for the given amount of microseconds.
+ *
+ * @returns nothing.
+ * @param   pTm      The timekeeping manager to use.
+ * @param   cMicros  Amount of microseconds to delay.
+ */
+void TMDelayMicros(PTM pTm, uint64_t cMicros);
 
 /**
  * Register a new timer callback with the timekeeping manager.

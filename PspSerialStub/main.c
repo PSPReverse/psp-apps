@@ -84,8 +84,8 @@ typedef struct PSPTIMER
     TM                          Tm;
     /** Last seen counter value of the 100MHz timer (10ns granularity). */
     uint32_t                    cCnts;
-    /** Sub millisecond ticks seen since the internal clock counter increment. */
-    uint32_t                    cSubMsTicks;
+    /** Sub microsecond ticks seen since the internal clock counter increment. */
+    uint32_t                    cSubUsTicks;
 } PSPTIMER;
 /** Pointer to a timer. */
 typedef PSPTIMER *PPSPTIMER;
@@ -174,8 +174,6 @@ typedef struct PSPSTUBSTATE
     uint32_t                    offPduRecv;
     /** Input buffer related state. */
     PSPINBUF                    aInBufs[2];
-    /** Align following buffers on 16byte boundary. */
-    uint64_t                    u64Pad0;
     /** The PDU receive buffer. */
     uint8_t                     abPdu[_4K];
     /** The PDU response buffer. */
@@ -498,7 +496,7 @@ static int pspStubTimerInit(PPSPTIMER pTimer)
     {
         /* Initialize the timer. */
         pTimer->cCnts       = 0;
-        pTimer->cSubMsTicks = 0;
+        pTimer->cSubUsTicks = 0;
         *(volatile uint32_t *)(0x03010424 + 32) = 0;     /* Counter value. */
         *(volatile uint32_t *)(0x03010424)      = 0x101; /* This starts the timer. */
     }
@@ -525,27 +523,72 @@ static void pspStubTimerHandle(PPSPTIMER pTimer)
         cTicksPassed = cCnts + (0xffffffff - pTimer->cCnts) + 1;
 
     /*
-     * Let the internal clock advance depending on the amount of milliseconds passed.
+     * Let the internal clock advance depending on the amount of microseconds passed.
      *
-     * 10ns granularity means 100 ticks per us -> 100 * 1000 ticks per ms.
+     * 10ns granularity means 100 ticks per us.
      */
-    if (cTicksPassed >= 100 * 1000)
+    if (cTicksPassed >= 100)
     {
-        uint32_t cMsPassed = cTicksPassed / (100 * 1000);
-        TMTickMultiple(&pTimer->Tm, cMsPassed);
-        cTicksPassed -= cMsPassed * (100 * 1000);
+        uint32_t cUsPassed = cTicksPassed / 100;
+        TMTickMultiple(&pTimer->Tm, cUsPassed);
+        cTicksPassed -= cUsPassed * 100;
     }
 
     /* Check whether the remaining ticks added to the accumulated ones exceed 1ms. */
-    cTicksPassed += pTimer->cSubMsTicks;
-    if (cTicksPassed >= 100 * 1000)
+    cTicksPassed += pTimer->cSubUsTicks;
+    if (cTicksPassed >= 100)
     {
         TMTick(&pTimer->Tm);
-        cTicksPassed -= 100 * 1000;
+        cTicksPassed -= 100;
     }
 
-    pTimer->cSubMsTicks = cTicksPassed;
+    pTimer->cSubUsTicks = cTicksPassed;
     pTimer->cCnts       = cCnts;
+}
+
+
+/**
+ * Returns the amount of microseconds passed since power on/reset.
+ *
+ * @returns Number of microseconds passed.
+ * @param   pTimer                  The global timer.
+ */
+static uint64_t pspStubTimerGetMicros(PPSPTIMER pTimer)
+{
+    pspStubTimerHandle(pTimer);
+    return TMGetMicros(&pTimer->Tm);
+}
+
+
+/**
+ * Returns the global number of microseconds passed.
+ *
+ * @returns Number of microseconds passed.
+ * @param   pThis                   The serial stub instance data.
+ */
+static inline uint64_t pspStubGetMicros(PPSPSTUBSTATE pThis)
+{
+    return pspStubTimerGetMicros(&pThis->Timer);
+}
+
+
+/**
+ * Wait the given number of microseconds.
+ *
+ * @returns nothing.
+ * @param   pThis                   The serial stub instance data.
+ * @param   cMicros                 Number of microseconds to wait.
+ */
+static void pspStubDelayUs(PPSPSTUBSTATE pThis, uint64_t cMicros)
+{
+    uint64_t tsStart = pspStubGetMicros(pThis);
+    while (pspStubGetMicros(pThis) <= tsStart + cMicros);
+}
+
+
+void pspSerialStubDelayUs(uint64_t cMicros)
+{
+    pspStubDelayUs(&g_StubState, cMicros);
 }
 
 
