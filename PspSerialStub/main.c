@@ -164,6 +164,8 @@ typedef struct PSPSTUBSTATE
     bool                        fIrqPending;
     /** Flag whether an IRQ notification was sent. */
     bool                        fIrqNotificationSent;
+    /** Flag whether an operation caused an undefined instruction. */
+    bool                        fUndefInsnPending;
     /** Number of beacons sent. */
     uint32_t                    cBeaconsSent;
     /** Number of PDUs sent so far. */
@@ -1565,7 +1567,7 @@ static int pspStubPduProcessCoProcRw(PPSPSTUBSTATE pThis, const void *pvPayload,
                                     : PSPSERIALPDURRNID_RESPONSE_COPROC_READ;
     const void *pvRespPayload = NULL;
     uint32_t uValRead = 0;
-    size_t cbResPayload = 0;
+    size_t cbRespPayload = 0;
     if (fWrite)
     {
         uint32_t uVal = *(uint32_t *)(pReq + 1);
@@ -1587,7 +1589,7 @@ static int pspStubPduProcessCoProcRw(PPSPSTUBSTATE pThis, const void *pvPayload,
     else
     {
         pvRespPayload = &uValRead;
-        cbResPayload  = sizeof(uValRead);
+        cbRespPayload = sizeof(uValRead);
 
         /* Insert the parameters into the template */
         volatile uint32_t *pu32Insn = (volatile uint32_t *)((uintptr_t)pspSerialStubCoProcReadAsm);
@@ -1605,7 +1607,15 @@ static int pspStubPduProcessCoProcRw(PPSPSTUBSTATE pThis, const void *pvPayload,
         uValRead = pspSerialStubCoProcReadAsm();
     }
 
-    return pspStubPduSend(pThis, INF_SUCCESS, 0 /*idCcd*/, enmResponse, pvRespPayload, cbResPayload);
+    int rcReq = PSP_SERIAL_STS_INF_SUCCESS;
+    if (pThis->fUndefInsnPending)
+    {
+        rcReq = PSP_SERIAL_STS_UNDEF_INSN_EXCEPTION;
+        pThis->fUndefInsnPending = false;
+        pvRespPayload = NULL;
+        cbRespPayload = 0;
+    }
+    return pspStubPduSend(pThis, rcReq, 0 /*idCcd*/, enmResponse, pvRespPayload, cbRespPayload);
 }
 
 
@@ -2341,10 +2351,11 @@ static void pspStubLogFlush(void *pvUser, uint8_t *pbBuf, size_t cbBuf)
 }
 
 
-void ExcpUndefInsn(void)
+void ExcpUndefInsn(PPSPIRQREGFRAME pRegFrame)
 {
     LogRel("ExcpUndefInsn:\n");
-    for (;;);
+    g_StubState.fUndefInsnPending = true;
+    pRegFrame->uRegLr += 4; /* Continue with instruction after the one causing the undefined exception. */
 }
 
 void ExcpSwi(void)
@@ -2397,6 +2408,7 @@ void main(void)
     pThis->cCcds                       = 1; /** @todo Determine the amount of available CCDs (can't be read from boot ROM service page at all times) */
     pThis->fConnected                  = false;
     pThis->fIrqPending                 = false;
+    pThis->fUndefInsnPending           = false;
 #ifdef PSP_SERIAL_STUB_SPI_MSG_CHAN
     pThis->fSpiMsgChan                 = true;
     pThis->fEarlyLogOverSpi            = false;

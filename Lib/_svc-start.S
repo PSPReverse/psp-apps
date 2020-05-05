@@ -69,8 +69,17 @@ _start:
     blx main
 
 _undef_insn:
+    stmfd sp!, {lr}         /* Save LR */
+    mrs lr, spsr            /* Save SPSR */
+    stmfd sp!, {lr}
+    stmfd sp!, {r0-r12}     /* Save register set. */
+    mov r0, sp
     blx ExcpUndefInsn
-    b fault
+    ldmfd sp!, {r0-r12}     /* Restore register set. */
+    ldmfd sp!, {lr}         /* Restore SPSR */
+    msr spsr, lr
+    ldmfd sp!, {lr}         /* Restore LR */
+    subs pc, lr, #4         /* Switch back to where we came from */
 
 _swi:
     blx ExcpSwi
