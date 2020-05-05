@@ -1580,6 +1580,7 @@ static int pspStubPduProcessCoProcRw(PPSPSTUBSTATE pThis, const void *pvPayload,
                     | (pReq->u8Opc2 & 0x7) << 5
                     | BIT(4)
                     | (pReq->u8Crm & 0xf);
+        asm volatile("mcr p15, 0x0, %0, cr7, cr5, 0x1\n": : "r" (pu32Insn) :"memory");
         asm volatile("dsb #0xf\nisb #0xf\n": : :"memory");
         pspSerialStubCoProcWriteAsm(uVal);
     }
@@ -1599,6 +1600,7 @@ static int pspStubPduProcessCoProcRw(PPSPSTUBSTATE pThis, const void *pvPayload,
                     | (pReq->u8Opc2 & 0x7) << 5
                     | BIT(4)
                     | (pReq->u8Crm & 0xf);
+        asm volatile("mcr p15, 0x0, %0, cr7, cr5, 0x1\n": : "r" (pu32Insn) :"memory");
         asm volatile("dsb #0xf\nisb #0xf\n": : :"memory");
         uValRead = pspSerialStubCoProcReadAsm();
     }
