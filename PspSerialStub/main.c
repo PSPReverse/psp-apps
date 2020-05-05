@@ -242,6 +242,9 @@ extern int pspStubCmIfOutBufWriteAsm(PCCMIF pCmIf, uint32_t idOutBuf, const void
 extern void pspStubCmIfDelayMsAsm(PCCMIF pCmIf, uint32_t cMillies);
 extern uint32_t pspStubCmIfTsGetMilliAsm(PCCMIF pCmIf);
 
+extern void pspSerialStubCoProcWriteAsm(uint32_t u32Val);
+extern uint32_t pspSerialStubCoProcReadAsm(void);
+
 static int pspStubPduProcess(PPSPSTUBSTATE pThis, PCPSPSERIALPDUHDR pPdu);
 static void pspStubIrqProcess(PPSPSTUBSTATE pThis);
 
@@ -1279,6 +1282,14 @@ static int pspStubPduProcessPspMemXfer(PPSPSTUBSTATE pThis, const void *pvPayloa
         void *pvDst = (void *)(uintptr_t)pReq->PspAddrStart;
         const void *pvSrc = (pReq + 1);
         memcpy(pvDst, pvSrc, cbXfer);
+
+        /* Invalidate and clean memory. */
+        while (cbXfer)
+        {
+            asm volatile("mcr p15, 0x0, %0, cr7, cr14, 0x1\n": : "r" (pvDst) :"memory");
+            pvDst = (uint8_t *)pvDst + 32;
+            cbXfer -= MIN(cbXfer, 32);
+        }
     }
     else
     {
@@ -1530,6 +1541,69 @@ static int pspStubPduProcessPspX86MmioXfer(PPSPSTUBSTATE pThis, const void *pvPa
         rc = pspStubPduSend(pThis, rc, 0 /*idCcd*/, enmResponse, NULL /*pvRespPayload*/, 0 /*cbRespPayload*/);
 
     return rc;
+}
+
+
+/**
+ * Reads/writes to a Co-Processor.
+ *
+ * @returns Status code.
+ * @param   pThis                   The serial stub instance data.
+ * @param   pvPayload               PDU payload.
+ * @param   cbPayload               Payload size in bytes.
+ * @param   fWrite                  Flag whether this is read or write request.
+ */
+static int pspStubPduProcessCoProcRw(PPSPSTUBSTATE pThis, const void *pvPayload, size_t cbPayload, bool fWrite)
+{
+    PCPSPSERIALCOPROCRWREQ pReq = (PCPSPSERIALCOPROCRWREQ)pvPayload;
+
+    if (cbPayload < sizeof(*pReq))
+        return ERR_INVALID_PARAMETER;
+
+    PSPSERIALPDURRNID enmResponse =   fWrite
+                                    ? PSPSERIALPDURRNID_RESPONSE_COPROC_WRITE
+                                    : PSPSERIALPDURRNID_RESPONSE_COPROC_READ;
+    const void *pvRespPayload = NULL;
+    uint32_t uValRead = 0;
+    size_t cbResPayload = 0;
+    if (fWrite)
+    {
+        uint32_t uVal = *(uint32_t *)(pReq + 1);
+
+        /* Insert the parameters into the template */
+        volatile uint32_t *pu32Insn = (volatile uint32_t *)((uintptr_t)pspSerialStubCoProcWriteAsm);
+        *pu32Insn =   (0xee << 24)
+                    | (pReq->u8Opc1 & 0x7) << 21
+                    | (pReq->u8Crn & 0xf) << 16
+                    | (0) << 12 /* Rt (r0) */
+                    | (pReq->u8CoProc & 0xf) << 8
+                    | (pReq->u8Opc2 & 0x7) << 5
+                    | BIT(4)
+                    | (pReq->u8Crm & 0xf);
+        asm volatile("dsb #0xf\nisb #0xf\n": : :"memory");
+        pspSerialStubCoProcWriteAsm(uVal);
+    }
+    else
+    {
+        pvRespPayload = &uValRead;
+        cbResPayload  = sizeof(uValRead);
+
+        /* Insert the parameters into the template */
+        volatile uint32_t *pu32Insn = (volatile uint32_t *)((uintptr_t)pspSerialStubCoProcReadAsm);
+        *pu32Insn =   (0xee << 24)
+                    | (pReq->u8Opc1 & 0x7) << 21
+                    | BIT(20)
+                    | (pReq->u8Crn & 0xf) << 16
+                    | (0) << 12 /* Rt (r0) */
+                    | (pReq->u8CoProc & 0xf) << 8
+                    | (pReq->u8Opc2 & 0x7) << 5
+                    | BIT(4)
+                    | (pReq->u8Crm & 0xf);
+        asm volatile("dsb #0xf\nisb #0xf\n": : :"memory");
+        uValRead = pspSerialStubCoProcReadAsm();
+    }
+
+    return pspStubPduSend(pThis, INF_SUCCESS, 0 /*idCcd*/, enmResponse, pvRespPayload, cbResPayload);
 }
 
 
@@ -1908,6 +1982,12 @@ static int pspStubPduProcess(PPSPSTUBSTATE pThis, PCPSPSERIALPDUHDR pPdu)
             break;
         case PSPSERIALPDURRNID_REQUEST_PSP_DATA_XFER:
             rc = pspStubPduProcessDataXfer(pThis, (pPdu + 1), pPdu->u.Fields.cbPdu);
+            break;
+        case PSPSERIALPDURRNID_REQUEST_COPROC_READ:
+            rc = pspStubPduProcessCoProcRw(pThis, (pPdu + 1), pPdu->u.Fields.cbPdu, false /*fWrite*/);
+            break;
+        case PSPSERIALPDURRNID_REQUEST_COPROC_WRITE:
+            rc = pspStubPduProcessCoProcRw(pThis, (pPdu + 1), pPdu->u.Fields.cbPdu, true /*fWrite*/);
             break;
         case PSPSERIALPDURRNID_REQUEST_INPUT_BUF_WRITE:
             rc = pspStubPduProcessInputBufWrite(pThis, (pPdu + 1), pPdu->u.Fields.cbPdu);

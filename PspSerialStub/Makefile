@@ -5,7 +5,7 @@ LIBGCC=$(shell $(CROSS_COMPILE)gcc -print-libgcc-file-name)
 LDFLAGS=$(LIBGCC)
 
 
-OBJS = main.o thumb-interwork.o string.o log.o tm.o uart.o pdu-transp-uart.o pdu-transp-spi-flash.o pdu-transp-spi-em100.o
+OBJS = main.o thumb-interwork.o utils.o string.o log.o tm.o uart.o pdu-transp-uart.o pdu-transp-spi-flash.o pdu-transp-spi-em100.o
 
 all : psp-serial-stub.elf psp-serial-stub.raw
 
