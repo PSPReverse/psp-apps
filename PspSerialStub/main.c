@@ -1526,7 +1526,7 @@ static int pspStubPduProcessPspSmnXfer(PPSPSTUBSTATE pThis, const void *pvPayloa
     {
         const void *pvRespPayload = NULL;
         uint8_t abRead[8];
-        size_t cbResPayload = 0;
+        size_t cbRespPayload = 0;
 
         if (   pReq->cbXfer == 1
             || pReq->cbXfer == 2
@@ -1538,7 +1538,7 @@ static int pspStubPduProcessPspSmnXfer(PPSPSTUBSTATE pThis, const void *pvPayloa
             {
                 pspStubMmioAccess(&abRead[0], pvMap, pReq->cbXfer);
                 pvRespPayload = &abRead[0];
-                cbResPayload  = pReq->cbXfer;
+                cbRespPayload = pReq->cbXfer;
             }
         }
         else
@@ -1552,15 +1552,15 @@ static int pspStubPduProcessPspSmnXfer(PPSPSTUBSTATE pThis, const void *pvPayloa
             {
                 memcpy(&pThis->abPduResp[0], pvMap, pReq->cbXfer);
                 pvRespPayload = &pThis->abPduResp[0];
-                cbResPayload  = pReq->cbXfer;
+                cbRespPayload = pReq->cbXfer;
             }
         }
 
         pspStubSmnUnmapByPtr(pThis, pvMap);
 
         PSPSTS rcReq = STS_INF_SUCCESS;
-        pspStubPduCheckForExcp(pThis, &rcReq, &pvRespPayload, &cbPayload);
-        return pspStubPduSend(pThis, rcReq, 0 /*idCcd*/, enmResponse, pvRespPayload, cbResPayload);
+        pspStubPduCheckForExcp(pThis, &rcReq, &pvRespPayload, &cbRespPayload);
+        return pspStubPduSend(pThis, rcReq, 0 /*idCcd*/, enmResponse, pvRespPayload, cbRespPayload);
     }
     else
         rc = pspStubPduSend(pThis, rc, 0 /*idCcd*/, enmResponse, NULL /*pvRespPayload*/, 0 /*cbRespPayload*/);
@@ -1594,7 +1594,7 @@ static int pspStubPduProcessPspX86MemXfer(PPSPSTUBSTATE pThis, const void *pvPay
     {
         size_t cbXfer = pReq->cbXfer;
         const void *pvRespPayload = NULL;
-        size_t cbResPayload = 0;
+        size_t cbRespPayload = 0;
         if (fWrite)
         {
             const void *pvSrc = (pReq + 1);
@@ -1603,13 +1603,13 @@ static int pspStubPduProcessPspX86MemXfer(PPSPSTUBSTATE pThis, const void *pvPay
         else
         {
             pvRespPayload = pvMap;
-            cbResPayload  = cbXfer;
+            cbRespPayload = cbXfer;
             /** @todo Need to copy into temporary buffer for proper exception handling. */
         }
 
         PSPSTS rcReq = STS_INF_SUCCESS;
-        pspStubPduCheckForExcp(pThis, &rcReq, &pvRespPayload, &cbPayload);
-        rc = pspStubPduSend(pThis, rcReq, 0 /*idCcd*/, enmResponse, pvRespPayload, cbResPayload);
+        pspStubPduCheckForExcp(pThis, &rcReq, &pvRespPayload, &cbRespPayload);
+        rc = pspStubPduSend(pThis, rcReq, 0 /*idCcd*/, enmResponse, pvRespPayload, cbRespPayload);
         pspStubX86PhysUnmapByPtr(pThis, pvMap);
     }
     else
@@ -1648,7 +1648,7 @@ static int pspStubPduProcessPspX86MmioXfer(PPSPSTUBSTATE pThis, const void *pvPa
     {
         const void *pvRespPayload = NULL;
         uint8_t abRead[8];
-        size_t cbResPayload = 0;
+        size_t cbRespPayload = 0;
         const void *pvSrc = NULL;
         void *pvDst = NULL;
         if (fWrite)
@@ -1657,13 +1657,13 @@ static int pspStubPduProcessPspX86MmioXfer(PPSPSTUBSTATE pThis, const void *pvPa
         {
             pspStubMmioAccess(&abRead[0], pvMap, pReq->cbXfer);
             pvRespPayload = &abRead[0];
-            cbResPayload  = pReq->cbXfer;
+            cbRespPayload = pReq->cbXfer;
         }
 
         pspStubX86PhysUnmapByPtr(pThis, pvMap);
         PSPSTS rcReq = STS_INF_SUCCESS;
-        pspStubPduCheckForExcp(pThis, &rcReq, &pvRespPayload, &cbPayload);
-        rc = pspStubPduSend(pThis, rcReq, 0 /*idCcd*/, enmResponse, pvRespPayload, cbResPayload);
+        pspStubPduCheckForExcp(pThis, &rcReq, &pvRespPayload, &cbRespPayload);
+        rc = pspStubPduSend(pThis, rcReq, 0 /*idCcd*/, enmResponse, pvRespPayload, cbRespPayload);
     }
     else
         rc = pspStubPduSend(pThis, rc, 0 /*idCcd*/, enmResponse, NULL /*pvRespPayload*/, 0 /*cbRespPayload*/);
@@ -1734,7 +1734,7 @@ static int pspStubPduProcessCoProcRw(PPSPSTUBSTATE pThis, const void *pvPayload,
     }
 
     PSPSTS rcReq = STS_INF_SUCCESS;
-    pspStubPduCheckForExcp(pThis, &rcReq, &pvRespPayload, &cbPayload);
+    pspStubPduCheckForExcp(pThis, &rcReq, &pvRespPayload, &cbRespPayload);
     return pspStubPduSend(pThis, rcReq, 0 /*idCcd*/, enmResponse, pvRespPayload, cbRespPayload);
 }
 
