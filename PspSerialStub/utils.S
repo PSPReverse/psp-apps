@@ -44,3 +44,19 @@ pspSerialStubCoProcReadAsm:
     bx lr
 .type pspSerialStubCoProcReadAsm, %function;
 
+
+/**
+ * Branches to a given address using the given register set.
+ *
+ * @returns The value read.
+ */
+.globl pspStubBranchToAsm
+pspStubBranchToAsm:
+    mov lr, r0
+    mov r12, r1
+    ldmia r12!, {r0-r11}
+    ldr r12, [r12]
+    bx lr                   /* This branches to the destination, bye bye world it was really nice here... */
+.type pspStubBranchToAsm, %function;
+
+

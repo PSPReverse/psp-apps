@@ -270,6 +270,8 @@ extern uint32_t pspStubCmIfTsGetMilliAsm(PCCMIF pCmIf);
 extern void pspSerialStubCoProcWriteAsm(uint32_t u32Val);
 extern uint32_t pspSerialStubCoProcReadAsm(void);
 
+extern void pspStubBranchToAsm(uint32_t PspAddrPc, const uint32_t *pau32Gprs) __attribute__((noreturn));
+
 static int pspStubPduProcess(PPSPSTUBSTATE pThis, PCPSPSERIALPDUHDR pPdu);
 static void pspStubIrqProcess(PPSPSTUBSTATE pThis);
 
@@ -2073,6 +2075,39 @@ static int pspStubPduProcessExecCodeMod(PPSPSTUBSTATE pThis, const void *pvPaylo
 
 
 /**
+ * Branches to a given address.
+ *
+ * @returns Status code.
+ * @param   pThis                   The serial stub instance data.
+ * @param   pvPayload               PDU payload.
+ * @param   cbPayload               Payload size in bytes.
+ */
+static int pspStubPduProcessBranchTo(PPSPSTUBSTATE pThis, const void *pvPayload, size_t cbPayload)
+{
+    PCPSPSERIALBRANCHTOREQ pReq = (PCPSPSERIALBRANCHTOREQ)pvPayload;
+
+    int rc = INF_SUCCESS;
+    if (cbPayload == sizeof(*pReq))
+    {
+        /* Send the response for branching of. */
+        rc = pspStubPduSend(pThis, STS_INF_SUCCESS, 0 /*idCcd*/, PSPSERIALPDURRNID_RESPONSE_BRANCH_TO, NULL /*pvRespPayload*/, 0 /*cbRespPayload*/);
+        if (STS_SUCCESS(rc))
+        {
+            PSPADDR PspAddrDst = pReq->PspAddrDst;
+            if (pReq->u32Flags & PSP_SERIAL_BRANCH_TO_F_THUMB)
+                PspAddrDst |= 1; /* switches to thumb in our assembly helper. */
+
+            pspStubBranchToAsm(PspAddrDst, &pReq->au32Gprs[0]); /* This will NOT return!. */
+        }
+    }
+    else
+        rc = pspStubPduSend(pThis, STS_ERR_INVALID_PARAMETER, 0 /*idCcd*/, PSPSERIALPDURRNID_RESPONSE_BRANCH_TO, NULL /*pvRespPayload*/, 0 /*cbRespPayload*/);
+
+    return rc;
+}
+
+
+/**
  * Processes the given PDU.
  *
  * @returns Status code.
@@ -2132,6 +2167,9 @@ static int pspStubPduProcess(PPSPSTUBSTATE pThis, PCPSPSERIALPDUHDR pPdu)
             break;
         case PSPSERIALPDURRNID_REQUEST_EXEC_CODE_MOD:
             rc = pspStubPduProcessExecCodeMod(pThis, (pPdu + 1), pPdu->u.Fields.cbPdu);
+            break;
+        case PSPSERIALPDURRNID_REQUEST_BRANCH_TO:
+            rc = pspStubPduProcessBranchTo(pThis, (pPdu + 1), pPdu->u.Fields.cbPdu);
             break;
         default:
             /* Should never happen as the ID was already checked during PDU validation. */
