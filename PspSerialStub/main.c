@@ -29,6 +29,7 @@
 #include <io.h>
 #include <uart.h>
 
+#include <common/status.h>
 #include <psp-stub/psp-serial-stub.h>
 #include <psp-stub/cm-if.h>
 
@@ -128,6 +129,26 @@ typedef enum PSPSERIALPDURECVSTATE
 
 
 /**
+ * Pending exception caused by a request.
+ */
+typedef enum PSPSTUBEXCP
+{
+    /** Invalid exception pending, do not use. */
+    PSPSTUBEXCP_INVALID = 0,
+    /** No exception is currently pending. */
+    PSPSTUBEXCP_NONE,
+    /** Data abort exception is pending. */
+    PSPSTUBEXCP_DATA_ABRT,
+    /** Prefetch abort exception is pending. */
+    PSPSTUBEXCP_PREFETCH_ABRT,
+    /** Undefined instruction exception is pending. */
+    PSPSTUBEXCP_UNDEF_INSN,
+    /** 32bit hack. */
+    PSPSTUBEXCP_32BIT_HACK = 0x7fffffff,
+} PSPSTUBEXCP;
+
+
+/**
  * Global stub instance.
  */
 typedef struct PSPSTUBSTATE
@@ -164,8 +185,6 @@ typedef struct PSPSTUBSTATE
     bool                        fIrqPending;
     /** Flag whether an IRQ notification was sent. */
     bool                        fIrqNotificationSent;
-    /** Flag whether an operation caused an undefined instruction. */
-    bool                        fUndefInsnPending;
     /** Number of beacons sent. */
     uint32_t                    cBeaconsSent;
     /** Number of PDUs sent so far. */
@@ -180,6 +199,10 @@ typedef struct PSPSTUBSTATE
     uint32_t                    offPduRecv;
     /** Input buffer related state. */
     PSPINBUF                    aInBufs[2];
+    /** Pending exception. */
+    PSPSTUBEXCP                 enmExcpPending;
+    /** Padding to 16byte boundary. */
+    uint8_t                     abPad0[12];
     /** The PDU receive buffer. */
     uint8_t                     abPdu[_4K];
     /** The PDU response buffer. */
@@ -1258,6 +1281,96 @@ uint32_t pspStubCmIfTsGetMilli(PCCMIF pCmIf)
 
 
 /**
+ * Converts the given excpetion to a string literal.
+ *
+ * @returns Pointer to string.
+ * @param   enmExcp                 The exception to convert to a string.
+ */
+static const char *pspStubExcpToStr(PSPSTUBEXCP enmExcp)
+{
+    switch (enmExcp)
+    {
+        case PSPSTUBEXCP_INVALID:
+            return "INVALID";
+        case PSPSTUBEXCP_NONE:
+            return "NONE";
+        case PSPSTUBEXCP_DATA_ABRT:
+            return "DATA_ABRT";
+        case PSPSTUBEXCP_PREFETCH_ABRT:
+            return "PREFETCH_ABRT";
+        case PSPSTUBEXCP_UNDEF_INSN:
+            return "UNDEF_INSN";
+        default:
+            break;
+    }
+
+    return "<UNKNOWN>";
+}
+
+
+/**
+ * Checks that there is no exception pending currently, otherwise it will halt the stub
+ * (double exceptions should never happen). If none is pending it will set the new one.
+ *
+ * @returns Nothing.
+ * @param   pThis                   The stub instance data.
+ * @param   enmExcpNew              The new exception which will be pending.
+ */
+static void pspStubExcpSetCheckNonePending(PPSPSTUBSTATE pThis, PSPSTUBEXCP enmExcpNew)
+{
+    if (pThis->enmExcpPending != PSPSTUBEXCP_NONE)
+    {
+        LogRel("EXCP: Got new exception '%s' while '%s' is still pending. The stub will stop now...!!\n",
+               pspStubExcpToStr(enmExcpNew), pThis->enmExcpPending);
+        for (;;);
+    }
+
+    pThis->enmExcpPending = enmExcpNew;
+}
+
+
+/**
+ * Checks for any pending exception returning the appropriate return code and adjusting the returned payload.
+ *
+ * @returns Status code.
+ * @param   pThis                   The serial stub instance data.
+ * @param   prcReq                  Where to store the status code to return in the response.
+ * @param   ppvRespPayload          The payload pointer, which will get reset to NULL if the request caused an exception.
+ * @param   pcbPayload              Pointer to the payload size, which will get reset to 0 if the request caused an exception.
+ */
+static int pspStubPduCheckForExcp(PPSPSTUBSTATE pThis, PSPSTS *prcReq, const void **ppvRespPayload, size_t *pcbPayload)
+{
+    if (pThis->enmExcpPending != PSPSTUBEXCP_NONE)
+    {
+        *ppvRespPayload = NULL;
+        *pcbPayload     = 0;
+
+        switch (pThis->enmExcpPending)
+        {
+            case PSPSTUBEXCP_DATA_ABRT:
+                *prcReq = STS_ERR_PSP_PDU_REQ_DATA_ABORT_EXCEPTION;
+                break;
+            case PSPSTUBEXCP_PREFETCH_ABRT:
+                *prcReq = STS_ERR_PSP_PDU_REQ_PREFETCH_ABORT_EXCEPTION;
+                break;
+            case PSPSTUBEXCP_UNDEF_INSN:
+                *prcReq = STS_ERR_PSP_PDU_REQ_UNDEF_INSN_EXCEPTION;
+                break;
+            case PSPSTUBEXCP_INVALID:
+            case PSPSTUBEXCP_NONE:
+            default:
+                *prcReq = STS_ERR_INVALID_PARAMETER;
+                break;
+        }
+
+        pThis->enmExcpPending = PSPSTUBEXCP_NONE;
+    }
+
+    return STS_INF_SUCCESS;
+}
+
+
+/**
  * Reads/writes data in local PSP SRAM.
  *
  * @returns Stauts code.
@@ -1298,9 +1411,12 @@ static int pspStubPduProcessPspMemXfer(PPSPSTUBSTATE pThis, const void *pvPayloa
         enmResponse   = PSPSERIALPDURRNID_RESPONSE_PSP_MEM_READ;
         pvRespPayload = (void *)(uintptr_t)pReq->PspAddrStart;
         cbResPayload  = cbXfer;
+        /** @todo Need to copy into temporary buffer for proper exception handling. */
     }
 
-    return pspStubPduSend(pThis, INF_SUCCESS, 0 /*idCcd*/, enmResponse, pvRespPayload, cbResPayload);
+    PSPSTS rcReq = STS_INF_SUCCESS;
+    pspStubPduCheckForExcp(pThis, &rcReq, &pvRespPayload, &cbPayload);
+    return pspStubPduSend(pThis, rcReq, 0 /*idCcd*/, enmResponse, pvRespPayload, cbResPayload);
 }
 
 
@@ -1379,7 +1495,9 @@ static int pspStubPduProcessPspMmioXfer(PPSPSTUBSTATE pThis, const void *pvPaylo
         cbResPayload  = cbXfer;
     }
 
-    return pspStubPduSend(pThis, INF_SUCCESS, 0 /*idCcd*/, enmResponse, pvRespPayload, cbResPayload);
+    PSPSTS rcReq = STS_INF_SUCCESS;
+    pspStubPduCheckForExcp(pThis, &rcReq, &pvRespPayload, &cbPayload);
+    return pspStubPduSend(pThis, rcReq, 0 /*idCcd*/, enmResponse, pvRespPayload, cbResPayload);
 }
 
 
@@ -1438,8 +1556,11 @@ static int pspStubPduProcessPspSmnXfer(PPSPSTUBSTATE pThis, const void *pvPayloa
             }
         }
 
-        rc = pspStubPduSend(pThis, INF_SUCCESS, 0 /*idCcd*/, enmResponse, pvRespPayload, cbResPayload);
         pspStubSmnUnmapByPtr(pThis, pvMap);
+
+        PSPSTS rcReq = STS_INF_SUCCESS;
+        pspStubPduCheckForExcp(pThis, &rcReq, &pvRespPayload, &cbPayload);
+        return pspStubPduSend(pThis, rcReq, 0 /*idCcd*/, enmResponse, pvRespPayload, cbResPayload);
     }
     else
         rc = pspStubPduSend(pThis, rc, 0 /*idCcd*/, enmResponse, NULL /*pvRespPayload*/, 0 /*cbRespPayload*/);
@@ -1483,9 +1604,12 @@ static int pspStubPduProcessPspX86MemXfer(PPSPSTUBSTATE pThis, const void *pvPay
         {
             pvRespPayload = pvMap;
             cbResPayload  = cbXfer;
+            /** @todo Need to copy into temporary buffer for proper exception handling. */
         }
 
-        rc = pspStubPduSend(pThis, INF_SUCCESS, 0 /*idCcd*/, enmResponse, pvRespPayload, cbResPayload);
+        PSPSTS rcReq = STS_INF_SUCCESS;
+        pspStubPduCheckForExcp(pThis, &rcReq, &pvRespPayload, &cbPayload);
+        rc = pspStubPduSend(pThis, rcReq, 0 /*idCcd*/, enmResponse, pvRespPayload, cbResPayload);
         pspStubX86PhysUnmapByPtr(pThis, pvMap);
     }
     else
@@ -1536,8 +1660,10 @@ static int pspStubPduProcessPspX86MmioXfer(PPSPSTUBSTATE pThis, const void *pvPa
             cbResPayload  = pReq->cbXfer;
         }
 
-        rc = pspStubPduSend(pThis, INF_SUCCESS, 0 /*idCcd*/, enmResponse, pvRespPayload, cbResPayload);
         pspStubX86PhysUnmapByPtr(pThis, pvMap);
+        PSPSTS rcReq = STS_INF_SUCCESS;
+        pspStubPduCheckForExcp(pThis, &rcReq, &pvRespPayload, &cbPayload);
+        rc = pspStubPduSend(pThis, rcReq, 0 /*idCcd*/, enmResponse, pvRespPayload, cbResPayload);
     }
     else
         rc = pspStubPduSend(pThis, rc, 0 /*idCcd*/, enmResponse, NULL /*pvRespPayload*/, 0 /*cbRespPayload*/);
@@ -1607,14 +1733,8 @@ static int pspStubPduProcessCoProcRw(PPSPSTUBSTATE pThis, const void *pvPayload,
         uValRead = pspSerialStubCoProcReadAsm();
     }
 
-    int rcReq = PSP_SERIAL_STS_INF_SUCCESS;
-    if (pThis->fUndefInsnPending)
-    {
-        rcReq = PSP_SERIAL_STS_UNDEF_INSN_EXCEPTION;
-        pThis->fUndefInsnPending = false;
-        pvRespPayload = NULL;
-        cbRespPayload = 0;
-    }
+    PSPSTS rcReq = STS_INF_SUCCESS;
+    pspStubPduCheckForExcp(pThis, &rcReq, &pvRespPayload, &cbPayload);
     return pspStubPduSend(pThis, rcReq, 0 /*idCcd*/, enmResponse, pvRespPayload, cbRespPayload);
 }
 
@@ -1796,22 +1916,25 @@ static int pspStubPduProcessDataXfer(PPSPSTUBSTATE pThis, const void *pvPayload,
     if (!rc)
     {
         void *pvRespPayload = NULL;
-        size_t cbResPayload = 0;
+        size_t cbRespPayload = 0;
 
         if (pReq->fFlags & PSP_SERIAL_DATA_XFER_F_MEMSET)
             pspStubPduDataXferMemset(pThis, pReq, pvMap);
         else if (pReq->fFlags & PSP_SERIAL_DATA_XFER_F_READ)
         {
             pvRespPayload = &pThis->abPduResp[0];
-            cbResPayload  = pReq->cbXfer;
+            cbRespPayload  = pReq->cbXfer;
 
             pspStubPduDataXferRead(pThis, pReq, pvMap, pvRespPayload);
         }
         else if (pReq->fFlags & PSP_SERIAL_DATA_XFER_F_WRITE)
             pspStubPduDataXferWrite(pThis, pReq, pvMap, (void *)(pReq + 1));
 
-        rc = pspStubPduSend(pThis, INF_SUCCESS, 0 /*idCcd*/, enmResponse, pvRespPayload, cbResPayload);
         pspStubPduDataXferAddressUnmapByPtr(pThis, pReq, pvMap);
+
+        PSPSTS rcReq = STS_INF_SUCCESS;
+        pspStubPduCheckForExcp(pThis, &rcReq, (const void **)&pvRespPayload, &cbRespPayload);
+        rc = pspStubPduSend(pThis, rcReq, 0 /*idCcd*/, enmResponse, pvRespPayload, cbRespPayload);
     }
     else
         rc = pspStubPduSend(pThis, rc, 0 /*idCcd*/, enmResponse, NULL /*pvRespPayload*/, 0 /*cbRespPayload*/);
@@ -2353,8 +2476,9 @@ static void pspStubLogFlush(void *pvUser, uint8_t *pbBuf, size_t cbBuf)
 
 void ExcpUndefInsn(PPSPIRQREGFRAME pRegFrame)
 {
-    LogRel("ExcpUndefInsn:\n");
-    g_StubState.fUndefInsnPending = true;
+    PPSPSTUBSTATE pThis = &g_StubState;
+
+    pspStubExcpSetCheckNonePending(pThis, PSPSTUBEXCP_UNDEF_INSN);
     pRegFrame->uRegLr += 4; /* Continue with instruction after the one causing the undefined exception. */
 }
 
@@ -2365,17 +2489,21 @@ void ExcpSwi(void)
 }
 
 
-void ExcpPrefAbrt(void)
+void ExcpPrefAbrt(PPSPIRQREGFRAME pRegFrame)
 {
-    LogRel("ExcpPrefAbrt:\n");
-    for (;;);
+    PPSPSTUBSTATE pThis = &g_StubState;
+
+    pspStubExcpSetCheckNonePending(pThis, PSPSTUBEXCP_DATA_ABRT);
+    pRegFrame->uRegLr += 4; /* Continue with instruction after the one causing the prefetch abort. */
 }
 
 
-void ExcpDataAbrt(void)
+void ExcpDataAbrt(PPSPIRQREGFRAME pRegFrame)
 {
-    LogRel("ExcpDataAbrt:\n");
-    for (;;);
+    PPSPSTUBSTATE pThis = &g_StubState;
+
+    pspStubExcpSetCheckNonePending(pThis, PSPSTUBEXCP_DATA_ABRT);
+    pRegFrame->uRegLr += 4; /* Continue with instruction after the one causing the data abort. */
 }
 
 
@@ -2408,7 +2536,7 @@ void main(void)
     pThis->cCcds                       = 1; /** @todo Determine the amount of available CCDs (can't be read from boot ROM service page at all times) */
     pThis->fConnected                  = false;
     pThis->fIrqPending                 = false;
-    pThis->fUndefInsnPending           = false;
+    pThis->enmExcpPending              = PSPSTUBEXCP_NONE;
 #ifdef PSP_SERIAL_STUB_SPI_MSG_CHAN
     pThis->fSpiMsgChan                 = true;
     pThis->fEarlyLogOverSpi            = false;

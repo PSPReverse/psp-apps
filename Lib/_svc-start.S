@@ -35,6 +35,28 @@
 .extern ExcpIrq
 .extern ExcpFiq
 
+
+/**
+ * Macro generating a an exception handler entry point.
+ *
+ * @param a_Name                Name of the entry point
+ * @param a_FnCall              The function to call.
+ */
+.macro EXCP_ENTRY_POINT_GEN a_Name a_FnCall
+\a_Name:
+    stmfd sp!, {lr}         /* Save LR */
+    mrs lr, spsr            /* Save SPSR */
+    stmfd sp!, {lr}
+    stmfd sp!, {r0-r12}     /* Save register set. */
+    mov r0, sp
+    blx \a_FnCall
+    ldmfd sp!, {r0-r12}     /* Restore register set. */
+    ldmfd sp!, {lr}         /* Restore SPSR */
+    msr spsr, lr
+    ldmfd sp!, {lr}         /* Restore LR */
+    subs pc, lr, #4         /* Switch back to where we came from */
+.endm
+
 _g_aExcpVectors:
     ldr pc, =_start
     ldr pc, =_undef_insn
@@ -68,43 +90,15 @@ _start:
     blx memset                        /* Clear BSS section. */
     blx main
 
-_undef_insn:
-    stmfd sp!, {lr}         /* Save LR */
-    mrs lr, spsr            /* Save SPSR */
-    stmfd sp!, {lr}
-    stmfd sp!, {r0-r12}     /* Save register set. */
-    mov r0, sp
-    blx ExcpUndefInsn
-    ldmfd sp!, {r0-r12}     /* Restore register set. */
-    ldmfd sp!, {lr}         /* Restore SPSR */
-    msr spsr, lr
-    ldmfd sp!, {lr}         /* Restore LR */
-    subs pc, lr, #4         /* Switch back to where we came from */
+/* Generate default exception handlers. */
+EXCP_ENTRY_POINT_GEN _undef_insn     ExcpUndefInsn
+EXCP_ENTRY_POINT_GEN _prefetch_abort ExcpPrefAbrt
+EXCP_ENTRY_POINT_GEN _data_abort     ExcpDataAbrt
+EXCP_ENTRY_POINT_GEN _irq            ExcpIrq
 
 _swi:
     blx ExcpSwi
     b fault
-
-_prefetch_abort:
-    blx ExcpPrefAbrt
-    b fault
-
-_data_abort:
-    blx ExcpDataAbrt
-    b fault
-
-_irq:
-    stmfd sp!, {lr}         /* Save LR */
-    mrs lr, spsr            /* Save SPSR */
-    stmfd sp!, {lr}
-    stmfd sp!, {r0-r12}     /* Save register set. */
-    mov r0, sp
-    blx ExcpIrq
-    ldmfd sp!, {r0-r12}     /* Restore register set. */
-    ldmfd sp!, {lr}         /* Restore SPSR */
-    msr spsr, lr
-    ldmfd sp!, {lr}         /* Restore LR */
-    subs pc, lr, #4         /* Switch back to where we came from */
 
 _fiq:
     blx ExcpFiq
