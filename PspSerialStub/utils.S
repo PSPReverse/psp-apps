@@ -52,6 +52,7 @@ pspSerialStubCoProcReadAsm:
  */
 .globl pspStubBranchToAsm
 pspStubBranchToAsm:
+    cpsid i                 /* Disable interrupts. */
     mov lr, r0
     mov r12, r1
     ldmia r12!, {r0-r11}
