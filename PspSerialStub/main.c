@@ -696,6 +696,22 @@ static int pspStubTranspInit(PPSPSTUBSTATE pThis)
 
 
 /**
+ * Terminates the currently used transport channel.
+ *
+ * @returns nothing.
+ * @param   pThis                   The serial stub instance data.
+ */
+static void pspStubTranspTerm(PPSPSTUBSTATE pThis)
+{
+    PCPSPPDUTRANSPIF pTranspIf = NULL;
+
+    pThis->pIfTransp->pfnTerm(pThis->hPduTransp);
+    pThis->pIfTransp = NULL;
+    memset(&pThis->abTranspData[0], 0, sizeof(pThis->abTranspData[0]));
+}
+
+
+/**
  * Returns the number of bytes available for reading.
  *
  * @returns Number of bytes available for reading.
@@ -2097,6 +2113,7 @@ static int pspStubPduProcessBranchTo(PPSPSTUBSTATE pThis, const void *pvPayload,
             if (pReq->u32Flags & PSP_SERIAL_BRANCH_TO_F_THUMB)
                 PspAddrDst |= 1; /* switches to thumb in our assembly helper. */
 
+            pspStubTranspTerm(pThis); /* Terminate the transport layer. */
             pspStubBranchToAsm(PspAddrDst, &pReq->au32Gprs[0]); /* This will NOT return!. */
         }
     }
@@ -2593,7 +2610,8 @@ void main(void)
     for (uint32_t i = 0; i < ELEMENTS(pThis->aX86MapSlots); i++)
         pThis->aX86MapSlots[i].PhysX86AddrBase = NIL_X86PADDR;
 
-    pspStubSmnMap(pThis, 0xa0000000 + PSP_SERIAL_STUB_EARLY_SPI_LOG_OFF, &pThis->pvEarlySpiLog);
+    if (pThis->fEarlyLogOverSpi)
+        pspStubSmnMap(pThis, 0xa0000000 + PSP_SERIAL_STUB_EARLY_SPI_LOG_OFF, &pThis->pvEarlySpiLog);
 
     /* Init the timer. */
     pspStubTimerInit(&pThis->Timer);
@@ -2608,7 +2626,7 @@ void main(void)
         for (;;);
     }
 
-    pspStubInitHw(pThis);
+    /*pspStubInitHw(pThis);*/
 
     LogRel("main: Hardware initialized\n");
 
