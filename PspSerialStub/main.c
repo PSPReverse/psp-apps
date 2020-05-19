@@ -1339,7 +1339,7 @@ static void pspStubExcpSetCheckNonePending(PPSPSTUBSTATE pThis, PSPSTUBEXCP enmE
     if (pThis->enmExcpPending != PSPSTUBEXCP_NONE)
     {
         LogRel("EXCP: Got new exception '%s' while '%s' is still pending. The stub will stop now...!!\n",
-               pspStubExcpToStr(enmExcpNew), pThis->enmExcpPending);
+               pspStubExcpToStr(enmExcpNew), pspStubExcpToStr(pThis->enmExcpPending));
         for (;;);
     }
 
@@ -2224,7 +2224,13 @@ static void pspStubIrqProcess(PPSPSTUBSTATE pThis)
         {
             LogRel("pspStubIrqProcess: New IRQ is pending, sending notification!\n");
             pThis->fIrqNotificationSent = true;
-            int rc = pspStubPduSend(pThis, INF_SUCCESS, 0 /*idCcd*/, PSPSERIALPDURRNID_NOTIFICATION_IRQ, NULL /*pvRespPayload*/, 0 /*cbRespPayload*/);
+            PSPSERIALIRQNOT IrqNot;
+
+            /** @todo FIQ (not used by PSP). */
+            IrqNot.fIrqCur |= PSP_SERIAL_NOTIFICATION_IRQ_PENDING_IRQ;
+            IrqNot.fIrqPrev = 0;
+
+            int rc = pspStubPduSend(pThis, INF_SUCCESS, 0 /*idCcd*/, PSPSERIALPDURRNID_NOTIFICATION_IRQ, &IrqNot, sizeof(IrqNot));
             if (rc)
                 LogRel("pspStubIrqProcess: Sending IRQ notification failed with %d!\n", rc); /* Probably fails to but who cares at this point. */
         }
@@ -2235,6 +2241,15 @@ static void pspStubIrqProcess(PPSPSTUBSTATE pThis)
             uint32_t uIrqPending = *(volatile uint32_t *)0x030103c0;
             if (uIrqPending != 0)
             {
+                /* Send interrupt change notification. */
+                PSPSERIALIRQNOT IrqNot;
+
+                IrqNot.fIrqCur  = 0;
+                IrqNot.fIrqPrev = PSP_SERIAL_NOTIFICATION_IRQ_PENDING_IRQ;
+                int rc = pspStubPduSend(pThis, INF_SUCCESS, 0 /*idCcd*/, PSPSERIALPDURRNID_NOTIFICATION_IRQ, &IrqNot, sizeof(IrqNot));
+                if (rc)
+                    LogRel("pspStubIrqProcess: Sending IRQ notification failed with %d!\n", rc); /* Probably fails to but who cares at this point. */
+
                 /* Nothing pending anymore, re-enable interrupts. */
                 LogRel("pspStubIrqProcess: Interrupts processed, re-enable IRQs\n");
                 pThis->fIrqPending          = false;
@@ -2534,8 +2549,9 @@ void ExcpUndefInsn(PPSPIRQREGFRAME pRegFrame)
     PPSPSTUBSTATE pThis = &g_StubState;
 
     pspStubExcpSetCheckNonePending(pThis, PSPSTUBEXCP_UNDEF_INSN);
-    pRegFrame->uRegLr += 4; /* Continue with instruction after the one causing the undefined exception. */
+    /* Continue with instruction after the one causing the undefined exception. */
 }
+
 
 void ExcpSwi(void)
 {
@@ -2548,8 +2564,8 @@ void ExcpPrefAbrt(PPSPIRQREGFRAME pRegFrame)
 {
     PPSPSTUBSTATE pThis = &g_StubState;
 
-    pspStubExcpSetCheckNonePending(pThis, PSPSTUBEXCP_DATA_ABRT);
-    pRegFrame->uRegLr += 4; /* Continue with instruction after the one causing the prefetch abort. */
+    pspStubExcpSetCheckNonePending(pThis, PSPSTUBEXCP_PREFETCH_ABRT);
+    pRegFrame->uRegLr -= 4; /* Continue with instruction after the one causing the prefetch abort. */
 }
 
 
@@ -2557,8 +2573,12 @@ void ExcpDataAbrt(PPSPIRQREGFRAME pRegFrame)
 {
     PPSPSTUBSTATE pThis = &g_StubState;
 
+    LogRel("ExcpDataAbrt: pc=%#x cpsr=%#x r0=%#x r1=%#x r2=%#x r3=%#x r4=%#x r5=%#xr6=%#x r7=%#x\n",
+           pRegFrame->uRegLr -= 8, pRegFrame->uRegSpsr, pRegFrame->aGprs[0], pRegFrame->aGprs[1], pRegFrame->aGprs[2],
+           pRegFrame->aGprs[3], pRegFrame->aGprs[4], pRegFrame->aGprs[5], pRegFrame->aGprs[6], pRegFrame->aGprs[7]);
+
     pspStubExcpSetCheckNonePending(pThis, PSPSTUBEXCP_DATA_ABRT);
-    pRegFrame->uRegLr += 4; /* Continue with instruction after the one causing the data abort. */
+    pRegFrame->uRegLr -= 4; /* Continue with instruction after the one causing the data abort. */
 }
 
 
@@ -2571,6 +2591,7 @@ void ExcpIrq(PPSPIRQREGFRAME pRegFrame)
     g_StubState.fIrqPending          = true;
     g_StubState.fIrqNotificationSent = false;
     pRegFrame->uRegSpsr |= (1 << 7) | (1 << 6);
+    pRegFrame->uRegLr -= 4; /* Continue with executing the instruction being interrupted by the IRQ. */
 }
 
 
