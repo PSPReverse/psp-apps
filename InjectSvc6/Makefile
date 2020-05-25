@@ -16,7 +16,7 @@ clean:
 	$(CROSS_COMPILE)gcc $(CFLAGS) -c -o $@ $^
 
 psp-svc-inject.h: psp-svc-inject.bin
-	./bin2c $^ $@ psp_svc_inject
+	bin2c  $^ $@ psp_svc_inject
 
 psp-svc-inject.bin: psp-svc-inject.elf
 	$(CROSS_COMPILE)objcopy -O binary $^ $@

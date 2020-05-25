@@ -34,7 +34,7 @@
 #include "pdu-transp.h"
 
 /** Use the SPI message channel instead of the UART. */
-#define PSP_SERIAL_STUB_SPI_MSG_CHAN    1
+/* #define PSP_SERIAL_STUB_SPI_MSG_CHAN    0 */
 
 /** Indefinite wait. */
 #define PSP_SERIAL_STUB_INDEFINITE_WAIT 0xffffffff
@@ -1580,6 +1580,8 @@ void main(void)
     for (uint32_t i = 0; i < ELEMENTS(pThis->aX86MapSlots); i++)
         pThis->aX86MapSlots[i].PhysX86AddrBase = NIL_X86PADDR;
 
+    uint32_t* test = (uint32_t*)0x2000000;
+
     pspStubSmnMap(pThis, 0xa0000000 + PSP_SERIAL_STUB_EARLY_SPI_LOG_OFF, &pThis->pvEarlySpiLog);
 
     /* Init the timer. */
@@ -1596,8 +1598,10 @@ void main(void)
     }
 
     pspStubInitHw(pThis);
+    
 
     LogRel("main: Hardware initialized\n");
+    /* *test = 0x4; */
 
     /* Initialize the data transport mechanism selected. */
     int rc = pspStubTranspInit(pThis);

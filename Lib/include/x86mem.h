@@ -23,6 +23,7 @@
 #define ___x86mem_h
 
 #include <types.h>
+#include <stddef.h>
 
 /**
  * Fallback method to copy memory from the x86 host using svc 0x26 to copy 4 bytes at a time.

@@ -59,6 +59,12 @@ void * svc_smn_map_ex(uint32_t u32SmnAddr, uint32_t idCcxTgt);
 
 uint32_t svc_smn_unmap(void *pvUnmap);
 
+void svc_unknown_id_16(void* pvArg0);
+
+void svc_unknown_id_4b(uint64_t* pvArg0);
+
+void svc_load_app(uint32_t idApp, void *pvDst, uint32_t *pvCbDst);
+
 /** Own injected syscalls. */
 
 void *svc_injected_map_x86_host_memory_ex(X86PADDR PhysX86AddrMap, uint32_t enmType, uint32_t fFlags);

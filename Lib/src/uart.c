@@ -35,29 +35,41 @@
  */
 static int pspUartDivisorSet(PPSPUART pUart, uint32_t uDivisor)
 {
+    uint32_t* flash = (uint32_t*)0x2000800;
     uint8_t uDivLatchL = uDivisor & 0xff;
     uint8_t uDivLatchH = (uDivisor >> 8) & 0xff;
 
+    *flash++ = 0x1;
     /* Read LCR and set DLAB. */
     uint8_t uLcr = 0;
     int rc = PSPIoDevRegRead(pUart->pIfDevIo, X86_UART_REG_LCR_OFF, &uLcr, sizeof(uLcr));
+    *flash++ = 0x2;
     if (rc == INF_SUCCESS)
     {
         uLcr |= X86_UART_REG_LCR_DLAB;
+        *flash++ = 0x3;
         rc = PSPIoDevRegWrite(pUart->pIfDevIo, X86_UART_REG_LCR_OFF, &uLcr, sizeof(uLcr));
+        *flash++ = 0x4;
         if (rc == INF_SUCCESS)
         {
+            *flash++ = 0x5;
             rc = PSPIoDevRegWrite(pUart->pIfDevIo, X86_UART_REG_DL_LSB_OFF, &uDivLatchL, sizeof(uDivLatchL));
-            if (rc == INF_SUCCESS)
+            *flash++ = 0x6;
+            if (rc == INF_SUCCESS) {
+                *flash++ = 0x7;
                 rc = PSPIoDevRegWrite(pUart->pIfDevIo, X86_UART_REG_DL_MSB_OFF, &uDivLatchH, sizeof(uDivLatchH));
+            }
+            *flash++ = 0x8;
 
             /* Clear DLAB again. */
             uLcr &= ~X86_UART_REG_LCR_DLAB;
             int rc2 = PSPIoDevRegWrite(pUart->pIfDevIo, X86_UART_REG_LCR_OFF, &uLcr, sizeof(uLcr));
+            *flash++ = 0x9;
             if (rc == INF_SUCCESS)
                 rc = rc2;
         }
     }
+    *flash++ = 0xa;
 
     return rc;
 }
@@ -66,21 +78,28 @@ static int pspUartDivisorSet(PPSPUART pUart, uint32_t uDivisor)
 int PSPUartCreate(PPSPUART pUart, PCPSPIODEVIF pIfDevIo)
 {
     pUart->pIfDevIo = pIfDevIo;
+    uint32_t* flash = (uint32_t*)0x2000600;
 
     /* Bring the device into a known state. */
 
     /* Disable all interrupts. */
     uint8_t uTmp = 0;
+    *flash++ = 0x1;
     int rc = PSPIoDevRegWrite(pIfDevIo, X86_UART_REG_IER_OFF, &uTmp, sizeof(uTmp));
+    *flash++ = 0x2;
     if (rc == INF_SUCCESS)
     {
+        *flash++ = 0x3;
         /* Disable FIFO. */
         rc = PSPIoDevRegWrite(pIfDevIo, X86_UART_REG_FCR_OFF, &uTmp, sizeof(uTmp));
+        *flash++ = 0x4;
         if (rc == INF_SUCCESS)
         {
+            *flash++ = 0x5;
             /* Set known line parameters. */
             rc = PSPUartParamsSet(pUart, 115200, PSPUARTDATABITS_8BITS,
                                   PSPUARTPARITY_NONE, PSPUARTSTOPBITS_1BIT);
+            *flash++ = 0x6;
         }
     }
 
@@ -97,13 +116,20 @@ void PSPUartDestroy(PPSPUART pUart)
 int PSPUartParamsSet(PPSPUART pUart, uint32_t uBps, PSPUARTDATABITS enmDataBits,
                      PSPUARTPARITY enmParity, PSPUARTSTOPBITS enmStopBits)
 {
-    uint32_t uDivisor = 115200 / uBps; /* For PC compatible UARTs using a 1.8432 MHz crystal. */
+    uint32_t* flash = (uint32_t*)0x2000700;
+    *flash++ = 0x1;
+    /* uint32_t uDivisor = 115200 / uBps; /1* For PC compatible UARTs using a 1.8432 MHz crystal. *1/ */
+    uint32_t uDivisor = 1;
     uint8_t uLcr = 0;
+
+    *flash++ = 0x2;
 
     switch (enmDataBits)
     {
         case PSPUARTDATABITS_8BITS:
+            *flash++ = 0x3;
             X86_UART_REG_LCR_WLS_SET(uLcr, X86_UART_REG_LCR_WLS_8);
+            *flash++ = 0x4;
             break;
         default:
             return ERR_INVALID_PARAMETER;
@@ -127,9 +153,14 @@ int PSPUartParamsSet(PPSPUART pUart, uint32_t uBps, PSPUARTDATABITS enmDataBits,
             return ERR_INVALID_PARAMETER;
     }
 
+    *flash++ = 0x5;
     int rc = PSPIoDevRegWrite(pUart->pIfDevIo, X86_UART_REG_LCR_OFF, &uLcr, sizeof(uLcr));
-    if (!rc)
+    *flash++ = 0x6;
+    if (!rc) {
+        *flash++ = 0x7;
         rc = pspUartDivisorSet(pUart, uDivisor);
+        *flash++ = 0x8;
+    }
 
     return rc;
 }

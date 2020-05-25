@@ -100,6 +100,19 @@ svc_smn_unmap:
     mov pc, lr
 .type svc_smn_unmap, %function;
 
+.globl svc_unknown_id_16;
+svc_unknown_id_16:
+    svc #SVC_UNKNOWN_ID_16
+    mov pc, lr
+.type svc_unknown_id_16, %function
+
+.globl svc_unknown_id_4b;
+svc_unknown_id_4b:
+    svc #SVC_UNKNOWN_ID_4b
+    mov pc, lr
+.type svc_unknown_id_4b, %function
+
+
 /* void *svc_injected_map_x86_host_memory_ex(X86PADDR PhysX86AddrMap, uint32_t enmType, uint32_t fFlags) */
 .globl svc_injected_map_x86_host_memory_ex;
 svc_injected_map_x86_host_memory_ex:

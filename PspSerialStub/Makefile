@@ -1,5 +1,5 @@
 CROSS_COMPILE=arm-none-eabi-
-CFLAGS=-O0 -DIN_PSP -g -I../include -I../Lib/include -std=gnu99 -fomit-frame-pointer -nostartfiles -ffreestanding -Wextra -Werror -march=armv7ve
+CFLAGS=-O0 -DLOG_ENABLED -DIN_PSP -g -I../include -I../Lib/include -std=gnu99 -fomit-frame-pointer -nostartfiles -ffreestanding -Wextra -Werror -march=armv7ve
 VPATH=../Lib/src
 
 OBJS = main.o string.o log.o tm.o uart.o pdu-transp-uart.o pdu-transp-spi-flash.o
