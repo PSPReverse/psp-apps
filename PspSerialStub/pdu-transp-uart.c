@@ -587,62 +587,58 @@ static void enable_superio_port()
 {
     X86PADDR pvEspiUnknown = 0xfffe000a3048;
     volatile uint32_t* pvAddr;
-    volatile uint32_t* flash = (uint32_t*)0x2001400;
 
-    *flash++ = 1;
+    LogRel("enable_superio_port:\n");
 
     int rc = pspSerialStubX86PhysMap(pvEspiUnknown, true, (void**)&pvAddr);
     if (!rc)
     {
-        *flash++ = 2;
         uint32_t val = *pvAddr;
-        *flash++ = val;
-        val |= 0x7;
+        LogRel("0xfffe000a3048: %#x\n", val);
+        val |= 0x7 | BIT(5);
         *pvAddr = val;
-        *flash++ = *pvAddr;
+        LogRel("0xfffe000a3048: %#x\n", *pvAddr);
 
         pspSerialStubX86PhysUnmapByPtr((void*)pvAddr);
     }
-    *flash++ = 3;
-
 }
 
 static void map_superio_1640()
 {
     X86PADDR pvEspiUnknown = 0xfffe000a3064;
     volatile uint32_t* pvAddr;
-    volatile uint32_t* flash = (uint32_t*)0x2001500;
 
-    *flash++ = 1;
+    LogRel("map_superio_1640:\n");
 
     int rc = pspSerialStubX86PhysMap(pvEspiUnknown, true, (void**)&pvAddr);
     if (!rc)
     {
-        *flash++ = 2;
         uint32_t val = *pvAddr;
-        *flash++ = val;
+        LogRel("0xfffe000a3064: %#x\n", val);
         /* val = 0x1640; */
-        val = 0x1600;
+        val = 0; /*val = 0x1600;*/
         *pvAddr = val;
-        *flash++ = *pvAddr;
+        LogRel("0xfffe000a3064: %#x\n", *pvAddr);
 
         pspSerialStubX86PhysUnmapByPtr((void*)pvAddr);
     }
-    *flash++ = 3;
+}
 
+static uint8_t aspeed_reg_read(volatile uint8_t *pbBase, uint8_t uReg)
+{
+    *pbBase = uReg;
+    return *(pbBase + 1);
 }
 
 static void configure_superio()
 {
-    X86PADDR pvEspiUnknown = 0xfffdfc00164e;
+    X86PADDR pvEspiUnknown = 0xfffdfc00004e;
     volatile uint8_t* pvAddr;
-    volatile uint32_t* flash = (uint32_t*)0x2001600;
-
-    *flash++ = 1;
 
     int rc = pspSerialStubX86PhysMap(pvEspiUnknown, true, (void**)&pvAddr);
     if (!rc)
     {
+#if 0
         *pvAddr = 0x55;
         *pvAddr = 0x2;
         *(pvAddr + 1) = *(pvAddr+1) & ~0x0 | 0x80;
@@ -653,12 +649,50 @@ static void configure_superio()
         *pvAddr = 0x28;
         *(pvAddr + 1) = *(pvAddr+1) & ~0xf | 0x4;
         *pvAddr = 0xaa;
-
+#else
+        *pvAddr = 0xa5;
+        *pvAddr = 0xa5;
+        for (unsigned i = 0x21; i < 0x30; i++)
+            LogRel("Register %#x: %#x\n", i, aspeed_reg_read(pvAddr, i));
+        *(pvAddr + 1) = *(pvAddr+1) & ~0x0 | 0x80;
+        *pvAddr = 0xc;
+        *(pvAddr + 1) = *(pvAddr+1) & ~0x38 | 0x80;
+        *pvAddr = 0x25;
+        *(pvAddr + 1) = *(pvAddr+1) & ~0x1u | 0xfe;
+        *pvAddr = 0x28;
+        *(pvAddr + 1) = *(pvAddr+1) & ~0xf | 0x4;
+        *pvAddr = 0xaa;      
+#endif
         pspSerialStubX86PhysUnmapByPtr((void*)pvAddr);
     }
-    *flash++ = 3;
-
 }
+
+static void dump_lpc_gating(void)
+{
+    X86PADDR pvEspiUnknown = 0xfed803ec;
+    volatile uint8_t* pvAddr;
+
+    int rc = pspSerialStubX86PhysMap(pvEspiUnknown, true, (void**)&pvAddr);
+    if (!rc)
+    {
+        LogRel("dump_lpc_gating: %#x\n", *pvAddr);
+        pspSerialStubX86PhysUnmapByPtr((void*)pvAddr);
+    }
+}
+
+static void dump_lpc_aoac(void)
+{
+    X86PADDR pvEspiUnknown = 0xfed81e00 + 0x48;
+    volatile uint8_t* pvAddr;
+
+    int rc = pspSerialStubX86PhysMap(pvEspiUnknown, true, (void**)&pvAddr);
+    if (!rc)
+    {
+        LogRel("dump_lpc_aoac: %#x %#x\n", *pvAddr, *(pvAddr + 1));
+        pspSerialStubX86PhysUnmapByPtr((void*)pvAddr);
+    }
+}
+
 static int pspStubUartTranspInit(void *pvMem, size_t cbMem, PPSPPDUTRANSP phPduTransp)
 {
     (void)phPduTransp;
@@ -678,12 +712,16 @@ static int pspStubUartTranspInit(void *pvMem, size_t cbMem, PPSPPDUTRANSP phPduT
     pThis->IfIoDev.pfnRegRead  = pspStubX86UartRegRead;
     pThis->IfIoDev.pfnRegWrite = pspStubX86UartRegWrite;
 
+#if 0
     set_pci_d14_f3_rsvd_func();
     enable_espi();
     set_unknown_espi_reg();
+#endif
+    dump_lpc_aoac();
+    dump_lpc_gating();
     enable_io_uart_decode();
-    enable_superio_port();
     map_superio_1640();
+    enable_superio_port();
     configure_superio();
     /* dump_pw(); */
     /* read_gpio_state(); */

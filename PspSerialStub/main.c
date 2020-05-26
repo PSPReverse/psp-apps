@@ -1582,7 +1582,8 @@ void main(void)
 
     uint32_t* test = (uint32_t*)0x2000000;
 
-    pspStubSmnMap(pThis, 0xa0000000 + PSP_SERIAL_STUB_EARLY_SPI_LOG_OFF, &pThis->pvEarlySpiLog);
+    //pspStubSmnMap(pThis, 0xa0000000 + PSP_SERIAL_STUB_EARLY_SPI_LOG_OFF, &pThis->pvEarlySpiLog);
+    pThis->pvEarlySpiLog = (void *)0x2000000;
 
     /* Init the timer. */
     pspStubTimerInit(&pThis->Timer);
@@ -1597,7 +1598,7 @@ void main(void)
         for (;;);
     }
 
-    pspStubInitHw(pThis);
+    /*pspStubInitHw(pThis);*/
     
 
     LogRel("main: Hardware initialized\n");
