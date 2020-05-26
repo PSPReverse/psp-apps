@@ -28,9 +28,9 @@
 .extern main
 _start:
     push {lr}
-    ldr lr, [sp, #-8] /* Relocate the last two arguments on the stack */
+    ldr lr, [sp, #4] /* Relocate the last two arguments on the stack */
     push {lr}
-    ldr lr, [sp, #-16]
+    ldr lr, [sp, #12]
     push {lr}
     blx main
     pop {lr}

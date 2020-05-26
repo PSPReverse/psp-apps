@@ -54,7 +54,7 @@
     ldmfd sp!, {lr}         /* Restore SPSR */
     msr spsr, lr
     ldmfd sp!, {lr}         /* Restore LR */
-    subs pc, lr, #4         /* Switch back to where we came from */
+    subs pc, lr, #0         /* Switch back to where we came from, lr gets adjusted in the respective exception C handlers */
 .endm
 
 _g_aExcpVectors:
