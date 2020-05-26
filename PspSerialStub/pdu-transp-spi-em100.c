@@ -33,6 +33,8 @@
 
 
 #define PSP_SPI_MASTER_SMN_ADDR         0x02dc4000
+#define PSP_SPI_MASTER_ALT_CS           0x1d
+#define PSP_SPI_MASTER_SPEED_EN         0x20
 #define PSP_SPI_MASTER_SPEED_CFG        0x22
 #define PSP_SPI_MASTER_CMD_CODE         0x45
 #define PSP_SPI_MASTER_CMD_TRIG         0x47
@@ -61,6 +63,10 @@ typedef struct PSPPDUTRANSPINT
     uint8_t                     abChunk[PSP_SPI_MASTER_CHUNK_SZ];
     /** Offset into the chunk buffer. */
     uint8_t                     offChunk;
+    /** Chip select register value read during initialization. */
+    uint8_t                     bRegCs;
+    /** */
+    uint32_t                    fSpiBridgeDisable;
 } PSPPDUTRANSPINT;
 /** Pointer to the x86 UART PDU transport channel instance. */
 typedef PSPPDUTRANSPINT *PPSPPDUTRANSPINT;
@@ -110,9 +116,6 @@ static inline uint32_t pspStubSpiMasterReadRegU32(PPSPPDUTRANSPINT pThis, uint32
 static int pspStubSpiMasterXact(PPSPPDUTRANSPINT pThis, uint8_t bCmd, uint8_t *pbTx, size_t cbTx,
                                 uint8_t *pbRx, size_t cbRx)
 {
-    /* Wait until the master is idling. */
-    while (pspStubSpiMasterReadRegU32(pThis, PSP_SPI_MASTER_STATUS) & PSP_SPI_MASTER_STATUS_BSY);
-
     pspStubSpiMasterWriteRegU8(pThis, PSP_SPI_MASTER_CMD_CODE, bCmd);
     pspStubSpiMasterWriteRegU8(pThis, PSP_SPI_MASTER_TX_CNT,   (uint8_t)cbTx);
     pspStubSpiMasterWriteRegU8(pThis, PSP_SPI_MASTER_RX_CNT,   (uint8_t)cbRx);
@@ -171,68 +174,6 @@ static int pspStubEm100RegRead(PPSPPDUTRANSPINT pThis, uint8_t idxReg, uint8_t *
         *pbReg = abRecv[3];
 
     return rc;
-}
-
-
-/**
- * Writes to the upload FIFO of the em100.
- *
- * @returns Status code.
- * @param   pThis               The EM100 transport channel instance.
- * @param   pbBuf               The data to write.
- * @param   cbWrite             Number of bytes to write.
- */
-static int pspStubEm100UFifoWrite(PPSPPDUTRANSPINT pThis, const uint8_t *pbBuf, size_t cbWrite)
-{
-    uint8_t abData[PSP_SPI_MASTER_CHUNK_SZ + 2 + 2];
-
-    if (cbWrite > PSP_SPI_MASTER_CHUNK_SZ)
-        return ERR_INVALID_PARAMETER;
-
-    abData[0] = 0x0;
-    abData[1] = 0xc0;
-    abData[2] = 0xef;
-    abData[3] = (uint8_t)cbWrite;
-    for (uint32_t i = 0; i < cbWrite; i++)
-        abData[i + 4] = pbBuf[i];
-
-    return pspStubSpiMasterXact(pThis, 0x11, &abData[0], cbWrite + 4,
-                                NULL /*pbRx*/, 0 /*cbRx*/);
-}
-
-
-/**
- * Reads from the download FIFO of the em100.
- *
- * @returns Status code.
- * @param   pThis               The EM100 transport channel instance.
- * @param   pbBuf               Where to store the data read.
- * @param   cbRead              Number of bytes to read.
- */
-static int pspStubEm100DFifoRead(PPSPPDUTRANSPINT pThis, uint8_t *pbBuf, size_t cbRead)
-{
-    if (cbRead > PSP_SPI_MASTER_CHUNK_SZ)
-        return ERR_INVALID_PARAMETER;
-
-    uint8_t abCmd[3];
-    uint8_t abRecv[PSP_SPI_MASTER_CHUNK_SZ + sizeof(abCmd)];
-    abCmd[0] = 0x0;
-    abCmd[1] = 0xd0;
-
-    int rc = pspStubSpiMasterXact(pThis, 0x11, &abCmd[0], sizeof(abCmd),
-                                  &abRecv[0], cbRead + sizeof(abCmd));
-    if (!rc)
-    {
-        for (uint32_t i = 0; i < cbRead; i++)
-            pbBuf[i] = abRecv[i + sizeof(abCmd)];
-    }
-
-    /* Notify the other end that we cleared the FIFO. */
-    abCmd[0] = 0x0;
-    abCmd[1] = 0xc0;
-    abCmd[2] = 0xdf;
-    return pspStubSpiMasterXact(pThis, 0x11, &abCmd[0], sizeof(abCmd),
-                                NULL /*pbRx*/, 0 /*cbRx*/);
 }
 
 
@@ -316,6 +257,85 @@ static int pspStubEm100DFifoQueryAvail(PPSPPDUTRANSPINT pThis, size_t *pcbAvail)
 
 
 /**
+ * Writes to the upload FIFO of the em100.
+ *
+ * @returns Status code.
+ * @param   pThis               The EM100 transport channel instance.
+ * @param   pbBuf               The data to write.
+ * @param   cbWrite             Number of bytes to write.
+ */
+static int pspStubEm100UFifoWrite(PPSPPDUTRANSPINT pThis, const uint8_t *pbBuf, size_t cbWrite)
+{
+    uint8_t abData[PSP_SPI_MASTER_CHUNK_SZ + 2 + 2];
+
+    if (cbWrite > PSP_SPI_MASTER_CHUNK_SZ)
+        return ERR_INVALID_PARAMETER;
+
+    abData[0] = 0x0;
+    abData[1] = 0xc0;
+    abData[2] = 0xef;
+    abData[3] = (uint8_t)cbWrite;
+    for (uint32_t i = 0; i < cbWrite; i++)
+        abData[i + 4] = pbBuf[i];
+
+    return pspStubSpiMasterXact(pThis, 0x11, &abData[0], cbWrite + 4,
+                                NULL /*pbRx*/, 0 /*cbRx*/);
+}
+
+
+/**
+ * Reads from the download FIFO of the em100.
+ *
+ * @returns Status code.
+ * @param   pThis               The EM100 transport channel instance.
+ * @param   pbBuf               Where to store the data read.
+ * @param   cbRead              Number of bytes to read.
+ */
+static int pspStubEm100DFifoRead(PPSPPDUTRANSPINT pThis, uint8_t *pbBuf, size_t cbRead)
+{
+    if (cbRead > PSP_SPI_MASTER_CHUNK_SZ)
+        return ERR_INVALID_PARAMETER;
+
+    uint8_t abCmd[3];
+    uint8_t abRecv[PSP_SPI_MASTER_CHUNK_SZ + sizeof(abCmd)];
+    abCmd[0] = 0x0;
+    abCmd[1] = 0xd0;
+
+    int rc = pspStubSpiMasterXact(pThis, 0x11, &abCmd[0], sizeof(abCmd),
+                                  &abRecv[0], cbRead + sizeof(abCmd));
+    if (!rc)
+    {
+        for (uint32_t i = 0; i < cbRead; i++)
+            pbBuf[i] = abRecv[i + sizeof(abCmd)];
+    }
+
+    /* Wait for at least one free byte in the UFifo. */
+    for (;;)
+    {
+        size_t cbFree = 0;
+        rc = pspStubEm100UFifoQueryFree(pThis, &cbFree);
+        if (   rc
+            || cbFree)
+            break;
+
+        pspSerialStubDelayUs(10);
+    }
+
+    if (!rc)
+    {
+        /* Notify the other end that we cleared the FIFO. */
+        abCmd[0] = 0x0;
+        abCmd[1] = 0xc0;
+        abCmd[2] = 0xdf;
+        rc = pspStubSpiMasterXact(pThis, 0x11, &abCmd[0], sizeof(abCmd),
+                                  NULL /*pbRx*/, 0 /*cbRx*/);
+    }
+
+    return rc;
+}
+
+
+/**
  * Fetch the next chunk of data from the dFIFO if available.
  *
  * @returns Status code.
@@ -340,7 +360,7 @@ static int pspStubEm100FetchChunk(PPSPPDUTRANSPINT pThis)
     int rc = INF_SUCCESS;
     for (;;)
     {
-        pspSerialStubDelayMs(1);
+        pspSerialStubDelayUs(10);
 
         size_t cbThisAvail = 0;
         rc = pspStubEm100DFifoQueryAvail(pThis, &cbThisAvail);
@@ -384,9 +404,9 @@ static int pspStubEm100TranspWrite(PSPPDUTRANSP hPduTransp, const void *pvBuf, s
         rc = pspStubEm100UFifoQueryFree(pThis, &cbFree);
         if (!rc)
         {
-            if (cbFree)
+            if (cbFree >= 2 * (PSP_SPI_MASTER_CHUNK_SZ + 2))
             {
-                size_t cbThisWrite = MIN(cbWrite, PSP_SPI_MASTER_CHUNK_SZ);
+                size_t cbThisWrite = MIN(cbWrite, PSP_SPI_MASTER_CHUNK_SZ - 2);
                 cbThisWrite = MIN(cbThisWrite, cbFree);
 
                 rc = pspStubEm100UFifoWrite(pThis, pbBuf, cbThisWrite);
@@ -396,8 +416,10 @@ static int pspStubEm100TranspWrite(PSPPDUTRANSP hPduTransp, const void *pvBuf, s
                     cbWrite -= cbThisWrite;
                 }
             }
+#if 0
             else
                 pspSerialStubDelayMs(1); /* Wait for a moment to let the host empty the uFIFO. */
+#endif
         }
     }
 
@@ -454,7 +476,14 @@ static int pspStubEm100TranspEnd(PSPPDUTRANSP hPduTransp)
 
 static int pspStubEm100TranspBegin(PSPPDUTRANSP hPduTransp)
 {
-    /* Nothing to do. */
+#if 0
+    PPSPPDUTRANSPINT pThis = hPduTransp;
+
+    pspStubSpiMasterWriteRegU16(pThis, PSP_SPI_MASTER_SPEED_CFG, 0x1111);
+    pspStubSpiMasterWriteRegU8(pThis, PSP_SPI_MASTER_ALT_CS, pThis->bRegCs);
+    uint32_t u32RegCntrl0 = pspStubSpiMasterReadRegU32(pThis, 0);
+    pspStubSpiMasterWriteRegU32(pThis, 0, (u32RegCntrl0 & ~BIT(27)) | pThis->fSpiBridgeDisable);
+#endif
     return INF_SUCCESS;
 }
 
@@ -475,9 +504,14 @@ static int pspStubEm100TranspInit(void *pvMem, size_t cbMem, PPSPPDUTRANSP phPdu
     int rc = pspSerialStubSmnMap(PSP_SPI_MASTER_SMN_ADDR, (void **)&pThis->pvSmnMap);
     if (!rc)
     {
-#if 0 /** @todo Doesn't has any effect. */
-        pspStubSpiMasterWriteRegU16(pThis, PSP_SPI_MASTER_SPEED_CFG, 0x5555); /* Switches everything to 800kHz mode. */
+#if 1 /** @todo Doesn't has any effect. */
+        pspStubSpiMasterWriteRegU8(pThis, PSP_SPI_MASTER_SPEED_EN, 1);
+        pspStubSpiMasterWriteRegU16(pThis, PSP_SPI_MASTER_SPEED_CFG, 0x1111); /* Switches everything to 800kHz mode. */
 #endif
+
+        while (pspStubSpiMasterReadRegU32(pThis, PSP_SPI_MASTER_STATUS) & PSP_SPI_MASTER_STATUS_BSY);
+        pThis->bRegCs = pspStubSpiMasterReadRegU8(pThis, PSP_SPI_MASTER_ALT_CS);
+        pThis->fSpiBridgeDisable = pspStubSpiMasterReadRegU32(pThis, 0) & BIT(27);
 
         /* Check for the EM100 identifier. */
         uint8_t bId = 0;
