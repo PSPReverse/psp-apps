@@ -181,10 +181,17 @@ typedef struct PSPSTUBSTATE
     void                        *pvEarlySpiLog;
     /** Flag whether logging is enabled at all currently. */
     bool                        fLogEnabled;
+#if 0
     /** Flag whether an IRQ is pending for servicing. */
     bool                        fIrqPending;
     /** Flag whether an IRQ notification was sent. */
     bool                        fIrqNotificationSent;
+#else
+    /** Last IRQ status check value. */
+    bool                        fIrqLast;
+    /** Last FIQ status check value. */
+    bool                        fFiqLast;
+#endif
     /** Number of beacons sent. */
     uint32_t                    cBeaconsSent;
     /** Number of PDUs sent so far. */
@@ -2198,6 +2205,23 @@ static int pspStubPduProcess(PPSPSTUBSTATE pThis, PCPSPSERIALPDUHDR pPdu)
 
 
 /**
+ * Checks the status of the IRQ and FIQ line by reading the ISR.
+ *
+ * @returns nothing.
+ * @param   pfIrq       Where to store the status of the IRQ line.
+ * @param   pfFiq       Where to store the status of the FIQ line.
+ */
+static inline void pspStubIrqCheck(bool *pfIrq, bool *pfFiq)
+{
+    uint32_t u32Reg = 0;
+    asm volatile("mrc p15, 0x0, %0, cr12, cr1, 0x0\n": "=r" (u32Reg) : :"memory");
+
+    *pfIrq = (u32Reg & BIT(7)) ? true : false;
+    *pfFiq = (u32Reg & BIT(6)) ? true : false;
+}
+
+
+/**
  * Enables interrupts of the PSP again.
  *
  * @returns nothing.
@@ -2206,7 +2230,20 @@ static inline void pspStubIrqEnable(void)
 {
     asm volatile("dsb #0xf\n"
                  "isb #0xf\n"
-                 "cpsie i\n": : :"memory");
+                 "cpsie if\n": : :"memory");
+}
+
+
+/**
+ * Disables interrupts of the PSP again.
+ *
+ * @returns nothing.
+ */
+static inline void pspStubIrqDisable(void)
+{
+    asm volatile("dsb #0xf\n"
+                 "isb #0xf\n"
+                 "cpsid if\n": : :"memory");
 }
 
 
@@ -2218,6 +2255,31 @@ static inline void pspStubIrqEnable(void)
  */
 static void pspStubIrqProcess(PPSPSTUBSTATE pThis)
 {
+#if 1
+    bool fIrq = false;
+    bool fFiq = false;
+    pspStubIrqCheck(&fIrq, &fFiq);
+    if (   pThis->fIrqLast != fIrq
+        || pThis->fFiqLast != fFiq)
+    {
+        LogRel("pspStubIrqProcess: Interrupt status changed, sending notification IRQ: %u vs %u   FIQ: %u vs %u!\n",
+               fIrq, pThis->fIrqLast, fFiq, pThis->fFiqLast);
+
+        PSPSERIALIRQNOT IrqNot;
+
+        IrqNot.fIrqCur   = fIrq            ? PSP_SERIAL_NOTIFICATION_IRQ_PENDING_IRQ : 0;
+        IrqNot.fIrqCur  |= fFiq            ? PSP_SERIAL_NOTIFICATION_IRQ_PENDING_FIQ : 0;
+        IrqNot.fIrqPrev  = pThis->fIrqLast ? PSP_SERIAL_NOTIFICATION_IRQ_PENDING_IRQ : 0;
+        IrqNot.fIrqPrev |= pThis->fFiqLast ? PSP_SERIAL_NOTIFICATION_IRQ_PENDING_FIQ : 0;
+
+        int rc = pspStubPduSend(pThis, INF_SUCCESS, 0 /*idCcd*/, PSPSERIALPDURRNID_NOTIFICATION_IRQ, &IrqNot, sizeof(IrqNot));
+        if (rc)
+            LogRel("pspStubIrqProcess: Sending IRQ notification failed with %d!\n", rc); /* Probably fails to but who cares at this point. */
+
+        pThis->fIrqLast = fIrq;
+        pThis->fFiqLast = fFiq;
+    }
+#else
     if (pThis->fIrqPending)
     {
         if (!pThis->fIrqNotificationSent)
@@ -2236,28 +2298,23 @@ static void pspStubIrqProcess(PPSPSTUBSTATE pThis)
         }
         else
         {
-            /** @todo Possible race here. */
-            /* Check the IRQ pending register whether all IRQs were processed and re-enable interrupts in that case. */
-            uint32_t uIrqPending = *(volatile uint32_t *)0x030103c0;
-            if (uIrqPending != 0)
-            {
-                /* Send interrupt change notification. */
-                PSPSERIALIRQNOT IrqNot;
+            /* Send interrupt change notification. */
+            PSPSERIALIRQNOT IrqNot;
 
-                IrqNot.fIrqCur  = 0;
-                IrqNot.fIrqPrev = PSP_SERIAL_NOTIFICATION_IRQ_PENDING_IRQ;
-                int rc = pspStubPduSend(pThis, INF_SUCCESS, 0 /*idCcd*/, PSPSERIALPDURRNID_NOTIFICATION_IRQ, &IrqNot, sizeof(IrqNot));
-                if (rc)
-                    LogRel("pspStubIrqProcess: Sending IRQ notification failed with %d!\n", rc); /* Probably fails to but who cares at this point. */
+            IrqNot.fIrqCur  = 0;
+            IrqNot.fIrqPrev = PSP_SERIAL_NOTIFICATION_IRQ_PENDING_IRQ;
+            int rc = pspStubPduSend(pThis, INF_SUCCESS, 0 /*idCcd*/, PSPSERIALPDURRNID_NOTIFICATION_IRQ, &IrqNot, sizeof(IrqNot));
+            if (rc)
+                LogRel("pspStubIrqProcess: Sending IRQ notification failed with %d!\n", rc); /* Probably fails to but who cares at this point. */
 
-                /* Nothing pending anymore, re-enable interrupts. */
-                LogRel("pspStubIrqProcess: Interrupts processed, re-enable IRQs\n");
-                pThis->fIrqPending          = false;
-                pThis->fIrqNotificationSent = false;
-                pspStubIrqEnable();
-            }
+            /* Nothing pending anymore, re-enable interrupts. */
+            LogRel("pspStubIrqProcess: Interrupts processed, re-enable IRQs\n");
+            pThis->fIrqPending          = false;
+            pThis->fIrqNotificationSent = false;
+            pspStubIrqEnable();
         }
     }
+#endif
 }
 
 
@@ -2584,6 +2641,7 @@ void ExcpDataAbrt(PPSPIRQREGFRAME pRegFrame)
 
 void ExcpIrq(PPSPIRQREGFRAME pRegFrame)
 {
+#if 0
     /*
      * Set the interrupt pending global flag and disable interrupts
      * in the SPSR.
@@ -2592,6 +2650,12 @@ void ExcpIrq(PPSPIRQREGFRAME pRegFrame)
     g_StubState.fIrqNotificationSent = false;
     pRegFrame->uRegSpsr |= (1 << 7) | (1 << 6);
     pRegFrame->uRegLr -= 4; /* Continue with executing the instruction being interrupted by the IRQ. */
+#else
+    LogRel("ExcpIrq: pc=%#x cpsr=%#x r0=%#x r1=%#x r2=%#x r3=%#x r4=%#x r5=%#xr6=%#x r7=%#x\n",
+           pRegFrame->uRegLr -= 4, pRegFrame->uRegSpsr, pRegFrame->aGprs[0], pRegFrame->aGprs[1], pRegFrame->aGprs[2],
+           pRegFrame->aGprs[3], pRegFrame->aGprs[4], pRegFrame->aGprs[5], pRegFrame->aGprs[6], pRegFrame->aGprs[7]);
+    for (;;); /* Should never happen as interrupts are always disabled. */
+#endif
 }
 
 
@@ -2609,9 +2673,15 @@ void main(void)
 
     off           = 0;
 
+    pspStubIrqDisable();
     pThis->cCcds                       = 1; /** @todo Determine the amount of available CCDs (can't be read from boot ROM service page at all times) */
     pThis->fConnected                  = false;
+#if 0
     pThis->fIrqPending                 = false;
+#else
+    pThis->fIrqLast                    = false;
+    pThis->fFiqLast                    = false;
+#endif
     pThis->enmExcpPending              = PSPSTUBEXCP_NONE;
 #ifdef PSP_SERIAL_STUB_SPI_MSG_CHAN
     pThis->fSpiMsgChan                 = true;
