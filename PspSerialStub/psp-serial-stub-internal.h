@@ -79,5 +79,14 @@ int pspSerialStubSmnUnmapByPtr(void *pv);
  */
 void pspSerialStubDelayMs(uint32_t cMillies);
 
+
+/**
+ * Wait the given number of microseconds.
+ *
+ * @returns nothing.
+ * @param   cMicros                Number of microseconds to wait.
+ */
+void pspSerialStubDelayUs(uint64_t cMicros);
+
 #endif /* !__include_psp_serial_stub_internal_h */
 
