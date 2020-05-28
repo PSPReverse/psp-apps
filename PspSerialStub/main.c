@@ -2369,6 +2369,18 @@ static void pspStubSmnSetU32(PPSPSTUBSTATE pThis, SMNADDR SmnAddr, uint32_t fSet
 }
 
 
+static void pspStubSmnWrU32(PPSPSTUBSTATE pThis, SMNADDR SmnAddr, uint32_t u32Val)
+{
+    void *pvMap = NULL;
+    int rc = pspStubSmnMap(pThis, SmnAddr, &pvMap);
+    if (!rc)
+    {
+        pspStubMmioWrU32((PSPADDR)pvMap, u32Val);
+        pspStubSmnUnmapByPtr(pThis, pvMap);
+    }
+}
+
+
 static void pspStubSmnAndOrU32(PPSPSTUBSTATE pThis, SMNADDR SmnAddr, uint32_t fAnd, uint32_t fOr)
 {
     void *pvMap = NULL;
@@ -2490,6 +2502,76 @@ static void pspStubInitHw(PPSPSTUBSTATE pThis)
     pspStubMmioWrU32(0x32304d8, 0);
 }
 
+
+static void pspStubX86MmioWriteU32(PPSPSTUBSTATE pThis, X86PADDR PhysX86Addr, uint32_t u32Val)
+{
+    volatile uint32_t *pu32 = NULL;
+    int rc = pspStubX86PhysMap(pThis, PhysX86Addr, true /*fMmio*/, (void **)&pu32);
+    if (STS_SUCCESS(rc))
+    {
+        *pu32 = u32Val;
+        pspStubX86PhysUnmapByPtr(pThis, (void *)pu32);
+    }
+}
+
+static void pspStubX86MmioWriteU8(PPSPSTUBSTATE pThis, X86PADDR PhysX86Addr, uint8_t bVal)
+{
+    volatile uint8_t *pb = NULL;
+    int rc = pspStubX86PhysMap(pThis, PhysX86Addr, true /*fMmio*/, (void **)&pb);
+    if (STS_SUCCESS(rc))
+    {
+        *pb = bVal;
+        pspStubX86PhysUnmapByPtr(pThis, (void *)pb);
+    }
+}
+
+static void pspStubSerialSuperIoInit(PPSPSTUBSTATE pThis)
+{
+    pspStubX86MmioWriteU32(pThis, 0xfffe000a3048, 0x0020ff00);
+    pspStubX86MmioWriteU32(pThis, 0xfffe000a30d0, 0x08fdff86);
+    pspStubX86MmioWriteU8(pThis, 0xfed81e77, 0x27);
+    pspStubX86MmioWriteU32(pThis, 0xfec20040, 0x0);
+    pspStubX86MmioWriteU32(pThis, 0xfffe000a3044, 0xc0);
+    pspStubX86MmioWriteU32(pThis, 0xfffe000a3048, 0x20ff07);
+    pspStubX86MmioWriteU32(pThis, 0xfffe000a3064, 0x1640);
+    pspStubX86MmioWriteU32(pThis, 0xfffe000a3000, 0xffffff00);
+    pspStubX86MmioWriteU32(pThis, 0xfffe000a30a0, 0xfec10002);
+    pspStubX86MmioWriteU32(pThis, 0xfed80300,     0xe3020b11);
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc000072, 0x6);
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc000072, 0x7);
+    pspStubSmnWrU32(pThis, 0x2dc58d0, 0x0c7c17cf);
+    pspStubX86MmioWriteU32(pThis, 0xfffe000a3044, 0xc0);
+    pspStubX86MmioWriteU32(pThis, 0xfffe000a3048, 0x20ff07);
+    pspStubX86MmioWriteU32(pThis, 0xfffe000a3064, 0x1640);
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc00002e, 0x87);
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc00002e, 0x01);
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc00002e, 0x55);
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc00002e, 0x55);
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc00002e, 0x07);
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc00002f, 0x07);
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc00002e, 0x24);
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc00002f, 0x00);
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc00002f, 0x10);
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc00002e, 0x02);
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc00002f, 0x02);
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc00002e, 0x87);
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc00002e, 0x01);
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc00002e, 0x55);
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc00002e, 0x55);
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc00002e, 0x23);
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc00002f, 0x40);
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc00002f, 0x40);
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc00002e, 0x07);
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc00002f, 0x01);
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc00002e, 0x61);
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc00002f, 0xf8);
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc00002e, 0x60);
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc00002f, 0x03);
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc00002e, 0x30);
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc00002f, 0x01);
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc00002e, 0x02);
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc00002f, 0x02);
+}
 
 static uint32_t pspStubGetPhysDieId(PPSPSTUBSTATE pThis)
 {
@@ -2718,6 +2800,10 @@ void main(void)
     }
 
     /*pspStubInitHw(pThis);*/
+
+#ifndef PSP_SERIAL_STUB_SPI_MSG_CHAN
+    pspStubSerialSuperIoInit(pThis);
+#endif
 
     LogRel("main: Hardware initialized\n");
 
