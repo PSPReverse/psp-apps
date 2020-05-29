@@ -1,0 +1,388 @@
+Archive member included to satisfy reference by file (symbol)
+
+/usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a(_udivsi3.o)
+                              uart.o (__aeabi_uidiv)
+/usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a(_dvmd_tls.o)
+                              /usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a(_udivsi3.o) (__aeabi_idiv0)
+/usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a(_aeabi_uldivmod.o)
+                              tm.o (__aeabi_uldivmod)
+/usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a(_udivmoddi4.o)
+                              /usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a(_aeabi_uldivmod.o) (__udivmoddi4)
+/usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a(_clzdi2.o)
+                              /usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a(_udivmoddi4.o) (__clzdi2)
+/usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a(_clzsi2.o)
+                              /usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a(_clzdi2.o) (__clzsi2)
+
+Memory Configuration
+
+Name             Origin             Length             Attributes
+RAM              0x0000000000000000 0x0000000000010000
+*default*        0x0000000000000000 0xffffffffffffffff
+
+Linker script and memory map
+
+                0x0000000000000100                . = 0x100
+
+.text           0x0000000000000100     0x4f70
+ *(.text)
+ .text          0x0000000000000100      0x174 _svc-start.o
+ *fill*         0x0000000000000274        0x4 
+ .text          0x0000000000000278     0x2cec main.o
+                0x00000000000006be                pspSerialStubX86PhysMap
+                0x00000000000006f2                pspSerialStubX86PhysUnmapByPtr
+                0x0000000000000710                pspSerialStubSmnUnmapByPtr
+                0x000000000000072e                pspSerialStubSmnMap
+                0x00000000000008c6                pspSerialStubDelayUs
+                0x000000000000094e                pspSerialStubDelayMs
+                0x0000000000001032                pspStubCmIfInBufPeek
+                0x0000000000001080                pspStubCmIfInBufPoll
+                0x0000000000001112                pspStubCmIfInBufRead
+                0x0000000000001284                pspStubCmIfOutBufWrite
+                0x00000000000012dc                pspStubCmIfDelayMs
+                0x00000000000012fe                pspStubCmIfTsGetMilli
+                0x0000000000002c9a                ExcpUndefInsn
+                0x0000000000002cba                ExcpSwi
+                0x0000000000002ccc                ExcpPrefAbrt
+                0x0000000000002cf6                ExcpDataAbrt
+                0x0000000000002d78                ExcpIrq
+                0x0000000000002dd8                ExcpFiq
+                0x0000000000002dea                main
+ .text          0x0000000000002f64       0x78 thumb-interwork.o
+                0x0000000000002f64                pspStubCmIfInBufPeekAsm
+                0x0000000000002f74                pspStubCmIfInBufPollAsm
+                0x0000000000002f84                pspStubCmIfInBufReadAsm
+                0x0000000000002fa0                pspStubCmIfOutBufWriteAsm
+                0x0000000000002fbc                pspStubCmIfDelayMsAsm
+                0x0000000000002fcc                pspStubCmIfTsGetMilliAsm
+ .text          0x0000000000002fdc       0x28 utils.o
+                0x0000000000002fdc                pspSerialStubCoProcWriteAsm
+                0x0000000000002fe4                pspSerialStubCoProcReadAsm
+                0x0000000000002fec                pspStubBranchToAsm
+ .text          0x0000000000003004      0x1f6 string.o
+                0x0000000000003004                strlen
+                0x0000000000003028                memset
+                0x000000000000310c                memcpy
+ *fill*         0x00000000000031fa        0x2 
+ .text          0x00000000000031fc      0x718 log.o
+                0x000000000000363c                LOGLoggerInit
+                0x0000000000003686                LOGLoggerGetDefaultInstance
+                0x0000000000003694                LOGLoggerSetDefaultInstance
+                0x00000000000036b8                LOGLoggerV
+                0x00000000000038f2                LOGLogger
+ .text          0x0000000000003914      0x2fc tm.o
+                0x0000000000003978                TMInit
+                0x00000000000039d0                TMTick
+                0x00000000000039f4                TMTickMultiple
+                0x0000000000003a20                TMGetMicros
+                0x0000000000003a42                TMGetMillies
+                0x0000000000003a72                TMDelayMillies
+                0x0000000000003ad8                TMDelayMicros
+                0x0000000000003b62                TMCallbackRegister
+                0x0000000000003bb0                TMCallbackDeregister
+                0x0000000000003bc0                TMCallbackSetExpirationAbsolute
+                0x0000000000003bd6                TMCallbackSetExpirationRelative
+                0x0000000000003bfa                TMCallbackStop
+ .text          0x0000000000003c10      0x430 uart.o
+                0x0000000000003d10                PSPUartCreate
+                0x0000000000003d6e                PSPUartDestroy
+                0x0000000000003d7e                PSPUartParamsSet
+                0x0000000000003e24                PSPUartGetDataAvail
+                0x0000000000003e68                PSPUartGetTxSpaceAvail
+                0x0000000000003eac                PSPUartRead
+                0x0000000000003f2e                PSPUartReadNB
+                0x0000000000003f76                PSPUartWrite
+                0x0000000000003ff8                PSPUartWriteNB
+ .text          0x0000000000004040      0x1a2 pdu-transp-uart.o
+ .text          0x00000000000041e2      0x46a pdu-transp-spi-flash.o
+ .text          0x000000000000464c      0x73e pdu-transp-spi-em100.o
+ *fill*         0x0000000000004d8a        0x2 
+ .text          0x0000000000004d8c      0x114 /usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a(_udivsi3.o)
+                0x0000000000004d8c                __udivsi3
+                0x0000000000004d8c                __aeabi_uidiv
+                0x0000000000004e80                __aeabi_uidivmod
+ .text          0x0000000000004ea0        0x4 /usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a(_dvmd_tls.o)
+                0x0000000000004ea0                __aeabi_ldiv0
+                0x0000000000004ea0                __aeabi_idiv0
+ .text          0x0000000000004ea4       0x3c /usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a(_aeabi_uldivmod.o)
+                0x0000000000004ea4                __aeabi_uldivmod
+ .text          0x0000000000004ee0        0x0 /usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a(_udivmoddi4.o)
+ .text          0x0000000000004ee0       0x28 /usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a(_clzdi2.o)
+                0x0000000000004ee0                __clzdi2
+ .text          0x0000000000004f08       0x48 /usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a(_clzsi2.o)
+                0x0000000000004f08                __clzsi2
+ *(.text*)
+ .text.__udivmoddi4
+                0x0000000000004f50      0x120 /usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a(_udivmoddi4.o)
+                0x0000000000004f50                __udivmoddi4
+
+.glue_7         0x0000000000005070        0x0
+ .glue_7        0x0000000000005070        0x0 linker stubs
+
+.glue_7t        0x0000000000005070        0x0
+ .glue_7t       0x0000000000005070        0x0 linker stubs
+
+.vfp11_veneer   0x0000000000005070        0x0
+ .vfp11_veneer  0x0000000000005070        0x0 linker stubs
+
+.v4_bx          0x0000000000005070        0x0
+ .v4_bx         0x0000000000005070        0x0 linker stubs
+
+.iplt           0x0000000000005070        0x0
+ .iplt          0x0000000000005070        0x0 _svc-start.o
+
+.rodata         0x0000000000005070      0x46c
+ *(.rodata)
+ .rodata        0x0000000000005070      0x3db main.o
+ *fill*         0x000000000000544b        0x1 
+ .rodata        0x000000000000544c       0x2b log.o
+ *fill*         0x0000000000005477        0x1 
+ .rodata        0x0000000000005478       0x20 pdu-transp-uart.o
+                0x0000000000005478                g_UartTransp
+ .rodata        0x0000000000005498       0x20 pdu-transp-spi-flash.o
+                0x0000000000005498                g_SpiFlashTransp
+ .rodata        0x00000000000054b8       0x24 pdu-transp-spi-em100.o
+                0x00000000000054bc                g_SpiFlashTranspEm100
+ *(.rodata*)
+
+.ARM.extab.text.__udivmoddi4
+                0x00000000000054dc        0x0
+ .ARM.extab.text.__udivmoddi4
+                0x00000000000054dc        0x0 /usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a(_udivmoddi4.o)
+
+.ARM.exidx.text.__udivmoddi4
+                0x00000000000054dc        0x8
+ .ARM.exidx.text.__udivmoddi4
+                0x00000000000054dc        0x8 /usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a(_udivmoddi4.o)
+
+.rel.dyn        0x00000000000054e4        0x0
+ .rel.iplt      0x00000000000054e4        0x0 _svc-start.o
+
+.data           0x00000000000054f0       0xf8
+ *(.data)
+ .data          0x00000000000054f0        0x0 _svc-start.o
+ .data          0x00000000000054f0       0xf8 main.o
+ .data          0x00000000000055e8        0x0 thumb-interwork.o
+ .data          0x00000000000055e8        0x0 utils.o
+ .data          0x00000000000055e8        0x0 string.o
+ .data          0x00000000000055e8        0x0 log.o
+ .data          0x00000000000055e8        0x0 tm.o
+ .data          0x00000000000055e8        0x0 uart.o
+ .data          0x00000000000055e8        0x0 pdu-transp-uart.o
+ .data          0x00000000000055e8        0x0 pdu-transp-spi-flash.o
+ .data          0x00000000000055e8        0x0 pdu-transp-spi-em100.o
+ .data          0x00000000000055e8        0x0 /usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a(_udivsi3.o)
+ .data          0x00000000000055e8        0x0 /usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a(_dvmd_tls.o)
+ .data          0x00000000000055e8        0x0 /usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a(_aeabi_uldivmod.o)
+ .data          0x00000000000055e8        0x0 /usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a(_udivmoddi4.o)
+ .data          0x00000000000055e8        0x0 /usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a(_clzdi2.o)
+ .data          0x00000000000055e8        0x0 /usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a(_clzsi2.o)
+ *(.data*)
+
+.igot.plt       0x00000000000055e8        0x0
+ .igot.plt      0x00000000000055e8        0x0 _svc-start.o
+
+.bss            0x00000000000055f0     0x67a8
+                0x00000000000055f0                BSS_START = .
+ *(.bss)
+ .bss           0x00000000000055f0        0x0 _svc-start.o
+ .bss           0x00000000000055f0     0x67a4 main.o
+ .bss           0x000000000000bd94        0x0 thumb-interwork.o
+ .bss           0x000000000000bd94        0x0 utils.o
+ .bss           0x000000000000bd94        0x0 string.o
+ .bss           0x000000000000bd94        0x4 log.o
+ .bss           0x000000000000bd98        0x0 tm.o
+ .bss           0x000000000000bd98        0x0 uart.o
+ .bss           0x000000000000bd98        0x0 pdu-transp-uart.o
+ .bss           0x000000000000bd98        0x0 pdu-transp-spi-flash.o
+ .bss           0x000000000000bd98        0x0 pdu-transp-spi-em100.o
+ .bss           0x000000000000bd98        0x0 /usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a(_udivsi3.o)
+ .bss           0x000000000000bd98        0x0 /usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a(_dvmd_tls.o)
+ .bss           0x000000000000bd98        0x0 /usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a(_aeabi_uldivmod.o)
+ .bss           0x000000000000bd98        0x0 /usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a(_udivmoddi4.o)
+ .bss           0x000000000000bd98        0x0 /usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a(_clzdi2.o)
+ .bss           0x000000000000bd98        0x0 /usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a(_clzsi2.o)
+ *(.bss*)
+                0x000000000000bd98                BSS_END = .
+
+.stack          0x000000000000bda0     0x2800
+                0x000000000000bda0                SCRATCH_STACK_BASE_SVC = .
+                0x000000000000dda0                . = (. + 0x2000)
+ *fill*         0x000000000000bda0     0x2000 
+                0x000000000000dda0                SCRATCH_STACK_TOP_SVC = .
+                0x000000000000dda0                SCRATCH_STACK_BASE_UNDEF = .
+                0x000000000000dfa0                . = (. + 0x200)
+ *fill*         0x000000000000dda0      0x200 
+                0x000000000000dfa0                SCRATCH_STACK_TOP_UNDEF = .
+                0x000000000000dfa0                SCRATCH_STACK_BASE_ABORT = .
+                0x000000000000e1a0                . = (. + 0x200)
+ *fill*         0x000000000000dfa0      0x200 
+                0x000000000000e1a0                SCRATCH_STACK_TOP_ABORT = .
+                0x000000000000e1a0                SCRATCH_STACK_BASE_IRQ = .
+                0x000000000000e3a0                . = (. + 0x200)
+ *fill*         0x000000000000e1a0      0x200 
+                0x000000000000e3a0                SCRATCH_STACK_TOP_IRQ = .
+                0x000000000000e3a0                SCRATCH_STACK_BASE_FIQ = .
+                0x000000000000e5a0                . = (. + 0x200)
+ *fill*         0x000000000000e3a0      0x200 
+                0x000000000000e5a0                SCRATCH_STACK_TOP_FIQ = .
+                0x0000000000010000                _ram_end = (ORIGIN (RAM) + LENGTH (RAM))
+LOAD _svc-start.o
+LOAD main.o
+LOAD thumb-interwork.o
+LOAD utils.o
+LOAD string.o
+LOAD log.o
+LOAD tm.o
+LOAD uart.o
+LOAD pdu-transp-uart.o
+LOAD pdu-transp-spi-flash.o
+LOAD pdu-transp-spi-em100.o
+LOAD /usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a
+OUTPUT(psp-serial-stub.elf elf32-littlearm)
+LOAD linker stubs
+
+.ARM.attributes
+                0x0000000000000000       0x31
+ .ARM.attributes
+                0x0000000000000000       0x23 _svc-start.o
+ .ARM.attributes
+                0x0000000000000023       0x2f main.o
+ .ARM.attributes
+                0x0000000000000052       0x1d thumb-interwork.o
+ .ARM.attributes
+                0x000000000000006f       0x1d utils.o
+ .ARM.attributes
+                0x000000000000008c       0x2f string.o
+ .ARM.attributes
+                0x00000000000000bb       0x2f log.o
+ .ARM.attributes
+                0x00000000000000ea       0x2f tm.o
+ .ARM.attributes
+                0x0000000000000119       0x2f uart.o
+ .ARM.attributes
+                0x0000000000000148       0x2f pdu-transp-uart.o
+ .ARM.attributes
+                0x0000000000000177       0x2f pdu-transp-spi-flash.o
+ .ARM.attributes
+                0x00000000000001a6       0x2f pdu-transp-spi-em100.o
+ .ARM.attributes
+                0x00000000000001d5       0x1c /usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a(_udivsi3.o)
+ .ARM.attributes
+                0x00000000000001f1       0x1c /usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a(_dvmd_tls.o)
+ .ARM.attributes
+                0x000000000000020d       0x1c /usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a(_aeabi_uldivmod.o)
+ .ARM.attributes
+                0x0000000000000229       0x2a /usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a(_udivmoddi4.o)
+ .ARM.attributes
+                0x0000000000000253       0x1c /usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a(_clzdi2.o)
+ .ARM.attributes
+                0x000000000000026f       0x1c /usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a(_clzsi2.o)
+
+.comment        0x0000000000000000       0x1e
+ .comment       0x0000000000000000       0x1e main.o
+                                         0x1f (size before relaxing)
+ .comment       0x000000000000001e       0x1f string.o
+ .comment       0x000000000000001e       0x1f log.o
+ .comment       0x000000000000001e       0x1f tm.o
+ .comment       0x000000000000001e       0x1f uart.o
+ .comment       0x000000000000001e       0x1f pdu-transp-uart.o
+ .comment       0x000000000000001e       0x1f pdu-transp-spi-flash.o
+ .comment       0x000000000000001e       0x1f pdu-transp-spi-em100.o
+
+.debug_info     0x0000000000000000     0x692f
+ .debug_info    0x0000000000000000     0x3932 main.o
+ .debug_info    0x0000000000003932       0x26 thumb-interwork.o
+ .debug_info    0x0000000000003958       0x26 utils.o
+ .debug_info    0x000000000000397e      0x274 string.o
+ .debug_info    0x0000000000003bf2      0x86a log.o
+ .debug_info    0x000000000000445c      0x4f6 tm.o
+ .debug_info    0x0000000000004952      0x6e9 uart.o
+ .debug_info    0x000000000000503b      0x659 pdu-transp-uart.o
+ .debug_info    0x0000000000005694      0x785 pdu-transp-spi-flash.o
+ .debug_info    0x0000000000005e19      0xb16 pdu-transp-spi-em100.o
+
+.debug_abbrev   0x0000000000000000      0xed7
+ .debug_abbrev  0x0000000000000000      0x3a7 main.o
+ .debug_abbrev  0x00000000000003a7       0x14 thumb-interwork.o
+ .debug_abbrev  0x00000000000003bb       0x14 utils.o
+ .debug_abbrev  0x00000000000003cf       0xe7 string.o
+ .debug_abbrev  0x00000000000004b6      0x245 log.o
+ .debug_abbrev  0x00000000000006fb      0x171 tm.o
+ .debug_abbrev  0x000000000000086c      0x163 uart.o
+ .debug_abbrev  0x00000000000009cf      0x170 pdu-transp-uart.o
+ .debug_abbrev  0x0000000000000b3f      0x19f pdu-transp-spi-flash.o
+ .debug_abbrev  0x0000000000000cde      0x1f9 pdu-transp-spi-em100.o
+
+.debug_aranges  0x0000000000000000      0x140
+ .debug_aranges
+                0x0000000000000000       0x20 main.o
+ .debug_aranges
+                0x0000000000000020       0x20 thumb-interwork.o
+ .debug_aranges
+                0x0000000000000040       0x20 utils.o
+ .debug_aranges
+                0x0000000000000060       0x20 string.o
+ .debug_aranges
+                0x0000000000000080       0x20 log.o
+ .debug_aranges
+                0x00000000000000a0       0x20 tm.o
+ .debug_aranges
+                0x00000000000000c0       0x20 uart.o
+ .debug_aranges
+                0x00000000000000e0       0x20 pdu-transp-uart.o
+ .debug_aranges
+                0x0000000000000100       0x20 pdu-transp-spi-flash.o
+ .debug_aranges
+                0x0000000000000120       0x20 pdu-transp-spi-em100.o
+
+.debug_ranges   0x0000000000000000       0xc0
+ .debug_ranges  0x0000000000000000       0x78 main.o
+ .debug_ranges  0x0000000000000078       0x30 uart.o
+ .debug_ranges  0x00000000000000a8       0x18 pdu-transp-spi-em100.o
+
+.debug_line     0x0000000000000000     0x2495
+ .debug_line    0x0000000000000000     0x1380 main.o
+ .debug_line    0x0000000000001380       0x47 thumb-interwork.o
+ .debug_line    0x00000000000013c7       0x44 utils.o
+ .debug_line    0x000000000000140b      0x1c0 string.o
+ .debug_line    0x00000000000015cb      0x30e log.o
+ .debug_line    0x00000000000018d9      0x213 tm.o
+ .debug_line    0x0000000000001aec      0x225 uart.o
+ .debug_line    0x0000000000001d11      0x13e pdu-transp-uart.o
+ .debug_line    0x0000000000001e4f      0x249 pdu-transp-spi-flash.o
+ .debug_line    0x0000000000002098      0x3fd pdu-transp-spi-em100.o
+
+.debug_str      0x0000000000000000     0x271d
+ .debug_str     0x0000000000000000     0x1bc9 main.o
+                                       0x1deb (size before relaxing)
+ .debug_str     0x0000000000001bc9       0x1e thumb-interwork.o
+                                         0x5d (size before relaxing)
+ .debug_str     0x0000000000001be7        0x8 utils.o
+                                         0x53 (size before relaxing)
+ .debug_str     0x0000000000001bef       0x40 string.o
+                                        0x188 (size before relaxing)
+ .debug_str     0x0000000000001c2f      0x1a4 log.o
+                                        0x3bc (size before relaxing)
+ .debug_str     0x0000000000001dd3      0x113 tm.o
+                                        0x2d1 (size before relaxing)
+ .debug_str     0x0000000000001ee6      0x293 uart.o
+                                        0x417 (size before relaxing)
+ .debug_str     0x0000000000002179      0x11a pdu-transp-uart.o
+                                        0x47b (size before relaxing)
+ .debug_str     0x0000000000002293      0x1da pdu-transp-spi-flash.o
+                                        0x41a (size before relaxing)
+ .debug_str     0x000000000000246d      0x2b0 pdu-transp-spi-em100.o
+                                        0x526 (size before relaxing)
+
+.debug_frame    0x0000000000000000     0x134c
+ .debug_frame   0x0000000000000000      0x96c main.o
+ .debug_frame   0x000000000000096c       0x58 string.o
+ .debug_frame   0x00000000000009c4      0x188 log.o
+ .debug_frame   0x0000000000000b4c      0x170 tm.o
+ .debug_frame   0x0000000000000cbc      0x164 uart.o
+ .debug_frame   0x0000000000000e20       0xf8 pdu-transp-uart.o
+ .debug_frame   0x0000000000000f18      0x178 pdu-transp-spi-flash.o
+ .debug_frame   0x0000000000001090      0x22c pdu-transp-spi-em100.o
+ .debug_frame   0x00000000000012bc       0x20 /usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a(_udivsi3.o)
+ .debug_frame   0x00000000000012dc       0x2c /usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a(_aeabi_uldivmod.o)
+ .debug_frame   0x0000000000001308       0x44 /usr/lib/gcc/arm-none-eabi/10.1.0/libgcc.a(_udivmoddi4.o)

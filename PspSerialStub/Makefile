@@ -1,5 +1,5 @@
 CROSS_COMPILE=arm-none-eabi-
-CFLAGS=-O2 -DIN_PSP -g -I../include -I../Lib/include -std=gnu99 -fomit-frame-pointer -nostartfiles -nostdlib -ffreestanding -Wextra -Werror -march=armv7-a -mthumb
+CFLAGS=-O0 -DIN_PSP -g -I../include -I../Lib/include -std=gnu99 -fomit-frame-pointer -nostartfiles -nostdlib -ffreestanding -Wextra -Werror -march=armv7-a -mthumb
 VPATH=../Lib/src
 LIBGCC=$(shell $(CROSS_COMPILE)gcc -print-libgcc-file-name)
 LDFLAGS=$(LIBGCC)

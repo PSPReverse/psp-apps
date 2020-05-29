@@ -169,7 +169,7 @@ static int pspStubEm100RegRead(PPSPPDUTRANSPINT pThis, uint8_t idxReg, uint8_t *
     abCmd[1] = 0xb0 | (idxReg & 0xf);
 
     int rc = pspStubSpiMasterXact(pThis, 0x11, &abCmd[0], sizeof(abCmd),
-                                  &abRecv[0], sizeof(abRecv));
+                                  &abRecv[0], 4);
     if (!rc)
         *pbReg = abRecv[3];
 

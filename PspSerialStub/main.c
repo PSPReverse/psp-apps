@@ -36,7 +36,7 @@
 #include "pdu-transp.h"
 
 /** Use the SPI message channel instead of the UART. */
-#define PSP_SERIAL_STUB_SPI_MSG_CHAN    1
+/* #define PSP_SERIAL_STUB_SPI_MSG_CHAN    1 */
 
 /** Indefinite wait. */
 #define PSP_SERIAL_STUB_INDEFINITE_WAIT 0xffffffff
@@ -2543,6 +2543,7 @@ static void pspStubSerialSuperIoInit(PPSPSTUBSTATE pThis)
     pspStubX86MmioWriteU32(pThis, 0xfffe000a3044, 0xc0);
     pspStubX86MmioWriteU32(pThis, 0xfffe000a3048, 0x20ff07);
     pspStubX86MmioWriteU32(pThis, 0xfffe000a3064, 0x1640);
+#if 0
     pspStubX86MmioWriteU8(pThis, 0xfffdfc00002e, 0x87);
     pspStubX86MmioWriteU8(pThis, 0xfffdfc00002e, 0x01);
     pspStubX86MmioWriteU8(pThis, 0xfffdfc00002e, 0x55);
@@ -2571,6 +2572,20 @@ static void pspStubSerialSuperIoInit(PPSPSTUBSTATE pThis)
     pspStubX86MmioWriteU8(pThis, 0xfffdfc00002f, 0x01);
     pspStubX86MmioWriteU8(pThis, 0xfffdfc00002e, 0x02);
     pspStubX86MmioWriteU8(pThis, 0xfffdfc00002f, 0x02);
+#else
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc00002e, 0xa5);
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc00002e, 0xa5);
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc00002e, 0x7);
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc00002f, 0x2);
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc00002e, 0x61);
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc00002f, 0xf8);
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc00002e, 0x60);
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc00002f, 0x3);
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc00002e, 0x30);
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc00002f, 0x1);
+    pspStubX86MmioWriteU8(pThis, 0xfffdfc00002e, 0xaa);
+
+#endif
 }
 
 static uint32_t pspStubGetPhysDieId(PPSPSTUBSTATE pThis)
@@ -2783,8 +2798,9 @@ void main(void)
     for (uint32_t i = 0; i < ELEMENTS(pThis->aX86MapSlots); i++)
         pThis->aX86MapSlots[i].PhysX86AddrBase = NIL_X86PADDR;
 
-    if (pThis->fEarlyLogOverSpi)
-        pspStubSmnMap(pThis, 0xa0000000 + PSP_SERIAL_STUB_EARLY_SPI_LOG_OFF, &pThis->pvEarlySpiLog);
+    /* if (pThis->fEarlyLogOverSpi) */
+    /*     pspStubSmnMap(pThis, 0xa0000000 + PSP_SERIAL_STUB_EARLY_SPI_LOG_OFF, &pThis->pvEarlySpiLog); */
+    pThis->pvEarlySpiLog = (void*)0x2000000;
 
     /* Init the timer. */
     pspStubTimerInit(&pThis->Timer);
