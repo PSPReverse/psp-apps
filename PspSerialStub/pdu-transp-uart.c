@@ -69,16 +69,16 @@ static int pspStubX86UartRegRead(PCPSPIODEVIF pIfIoDev, uint32_t offReg, void *p
  */
 static int pspStubX86UartRegWrite(PCPSPIODEVIF pIfIoDev, uint32_t offReg, const void *pvBuf, size_t cbWrite)
 {
-    volatile uint32_t* flash = (uint32_t*)0x2000500;
+    /* volatile uint32_t* flash = (uint32_t*)0x2000500; */
     PPSPPDUTRANSPINT pThis = (PPSPPDUTRANSPINT)pIfIoDev;
 
     /* UART supports only 1 byte wide register accesses. */
     if (cbWrite != 1) return ERR_INVALID_STATE;
 
-    *flash++ = (uint32_t)pThis->pvUart + offReg;
-    *flash++ = *(uint8_t*)pvBuf;
+    /* *flash++ = (uint32_t)pThis->pvUart + offReg; */
+    /* *flash++ = *(uint8_t*)pvBuf; */
     *(volatile uint8_t *)((uintptr_t)pThis->pvUart + offReg) = *(uint8_t *)pvBuf;
-    *flash++ = *(volatile uint8_t *)((uintptr_t)pThis->pvUart + offReg);
+    /* *flash++ = *(volatile uint8_t *)((uintptr_t)pThis->pvUart + offReg); */
     return INF_SUCCESS;
 }
 
@@ -133,7 +133,7 @@ static void pspStubUartTranspTerm(PSPPDUTRANSP hPduTransp)
 #define FCH_UART_LEGACY_DECODE		0xfedc0020
 #define   FCH_LEGACY_3F8_SH		3
 static void test() {
-    uint32_t* flash = (uint32_t*)0x2000000;
+    /* uint32_t* flash = (uint32_t*)0x2000000; */
     uint8_t* aoac = 0;
 
     uint16_t* uart_leg_decode = 0;
@@ -159,21 +159,21 @@ static void test() {
     rc = pspSerialStubX86PhysMap(ACPIMMIO_AOAC_BASE, true, (void**)&aoac);
     if (!rc)
     {
-        *(flash + 50) = 0xD3;
+        /* *(flash + 50) = 0xD3; */
         uint8_t val = *(aoac + uart0_d3_state);
-        *(flash + 51) = val;
+        /* *(flash + 51) = val; */
 
         val = *(aoac + uart0_d3_ctl);
-        *(flash + 52) = val;
+        /* *(flash + 52) = val; */
         val |= (1 << 3);
         *(aoac + uart0_d3_ctl) = val;
     }
     pspSerialStubDelayMs(100);
 
     uint8_t val = *(aoac + uart0_d3_ctl);
-    *(flash + 53) = val;
+    /* *(flash + 53) = val; */
     val = *(aoac + uart0_d3_state);
-    *(flash + 54) = val;
+    /* *(flash + 54) = val; */
     pspSerialStubX86PhysUnmapByPtr(aoac);
 
 }
@@ -192,7 +192,7 @@ static void configure_uart_gpio(void)
     uint32_t uart0_rx_func = 0;
     uint32_t uart0_gpio_tx = 138;
     uint32_t uart0_gpio_rx = 136;
-    volatile uint32_t* flash = (uint32_t*)0x2000000;
+    /* volatile uint32_t* flash = (uint32_t*)0x2000000; */
     volatile uint8_t* addr;
     X86PADDR gpio_addr;
     uint32_t* gpio_reg;
@@ -202,14 +202,14 @@ static void configure_uart_gpio(void)
     {
 		    /* iomux_write8(gpio, mux & AMD_GPIO_MUX_MASK); */
         *addr = uart0_rx_func & AMD_GPIO_MUX_MASK;
-        *(flash + 42) = *addr;
+        /* *(flash + 42) = *addr; */
 
 		    /* iomux_read8(gpio); /1* Flush posted write *1/ */
         (void volatile)*addr;
         pspSerialStubX86PhysUnmapByPtr((void*)addr);
 
     } else
-        *(flash + 42) = 0xDEADBEEF;
+        /* *(flash + 42) = 0xDEADBEEF; */
 
     gpio_addr = (X86PADDR)GPIO_BANK2_CONTROL(uart0_gpio_rx);
 
@@ -222,10 +222,10 @@ static void configure_uart_gpio(void)
         reg &= ~AMD_GPIO_CONTROL_MASK;
         reg |= GPIO_PULL_PULL_NONE;
         *gpio_reg = reg;
-        *(flash + 43) = *gpio_reg;
+        /* *(flash + 43) = *gpio_reg; */
         pspSerialStubX86PhysUnmapByPtr((void*)gpio_reg);
-    } else
-        *(flash + 43) = 0xDEADBEEF;
+    }
+        /* *(flash + 43) = 0xDEADBEEF; */
 }
 
 static uint32_t read_gpio_bank2(uint32_t gpio)
@@ -306,17 +306,17 @@ void read_gpio_state() {
     uint32_t val = 0;
 
 
-    volatile uint32_t* flash = (uint32_t*)0x2000100;
-    *flash++ = 0xDEADBEEF;
+    /* volatile uint32_t* flash = (uint32_t*)0x2000100; */
+    /* *flash++ = 0xDEADBEEF; */
 
-    *flash++ = read_gpio_iomux(gpio_138);
-    *flash++ = read_gpio_iomux(gpio_136);
-    *flash++ = read_gpio_iomux(gpio_143);
-    *flash++ = read_gpio_iomux(gpio_141);
-    *flash++ = read_gpio_iomux(gpio_137);
-    *flash++ = read_gpio_iomux(gpio_135);
-    *flash++ = read_gpio_iomux(gpio_140);
-    *flash++ = read_gpio_iomux(gpio_142);
+    /* *flash++ = read_gpio_iomux(gpio_138); */
+    /* *flash++ = read_gpio_iomux(gpio_136); */
+    /* *flash++ = read_gpio_iomux(gpio_143); */
+    /* *flash++ = read_gpio_iomux(gpio_141); */
+    /* *flash++ = read_gpio_iomux(gpio_137); */
+    /* *flash++ = read_gpio_iomux(gpio_135); */
+    /* *flash++ = read_gpio_iomux(gpio_140); */
+    /* *flash++ = read_gpio_iomux(gpio_142); */
 
     write_gpio_iomux(gpio_138,0); // UART 0 TX
     write_gpio_iomux(gpio_136,0); // UART 0 RX
@@ -327,98 +327,98 @@ void read_gpio_state() {
     write_gpio_iomux(gpio_140,1); // UART 3 TX
     write_gpio_iomux(gpio_142,1); // UART 3 RX
 
-    *flash++ = read_gpio_iomux(gpio_138);
-    *flash++ = read_gpio_iomux(gpio_136);
-    *flash++ = read_gpio_iomux(gpio_143);
-    *flash++ = read_gpio_iomux(gpio_141);
-    *flash++ = read_gpio_iomux(gpio_137);
-    *flash++ = read_gpio_iomux(gpio_135);
-    *flash++ = read_gpio_iomux(gpio_140);
-    *flash++ = read_gpio_iomux(gpio_142);
+    /* *flash++ = read_gpio_iomux(gpio_138); */
+    /* *flash++ = read_gpio_iomux(gpio_136); */
+    /* *flash++ = read_gpio_iomux(gpio_143); */
+    /* *flash++ = read_gpio_iomux(gpio_141); */
+    /* *flash++ = read_gpio_iomux(gpio_137); */
+    /* *flash++ = read_gpio_iomux(gpio_135); */
+    /* *flash++ = read_gpio_iomux(gpio_140); */
+    /* *flash++ = read_gpio_iomux(gpio_142); */
 
-    val = read_gpio_bank2(gpio_138); 
-    *flash++ = val;
-    val &= ~AMD_GPIO_CONTROL_MASK;
-    /* write_gpio_bank2(gpio_138, val); */
-    write_gpio_bank2(gpio_138, 0);
-    val = read_gpio_bank2(gpio_138); 
-    *flash++ = val;
+    /* val = read_gpio_bank2(gpio_138); */ 
+    /* *flash++ = val; */
+    /* val &= ~AMD_GPIO_CONTROL_MASK; */
+    /* /1* write_gpio_bank2(gpio_138, val); *1/ */
+    /* write_gpio_bank2(gpio_138, 0); */
+    /* val = read_gpio_bank2(gpio_138); */ 
+    /* *flash++ = val; */
 
-    val = read_gpio_bank2(gpio_136); 
-    *flash++ = val;
-    val &= ~AMD_GPIO_CONTROL_MASK;
-    /* write_gpio_bank2(gpio_136, val); */
-    write_gpio_bank2(gpio_136, 0);
-    val = read_gpio_bank2(gpio_136); 
-    *flash++ = val;
+    /* val = read_gpio_bank2(gpio_136); */ 
+    /* *flash++ = val; */
+    /* val &= ~AMD_GPIO_CONTROL_MASK; */
+    /* /1* write_gpio_bank2(gpio_136, val); *1/ */
+    /* write_gpio_bank2(gpio_136, 0); */
+    /* val = read_gpio_bank2(gpio_136); */ 
+    /* *flash++ = val; */
 
-    val = read_gpio_bank2(gpio_143); 
-    *flash++ = val;
-    val &= ~AMD_GPIO_CONTROL_MASK;
-    write_gpio_bank2(gpio_143, val);
-    val = read_gpio_bank2(gpio_143); 
-    *flash++ = val;
+    /* val = read_gpio_bank2(gpio_143); */ 
+    /* *flash++ = val; */
+    /* val &= ~AMD_GPIO_CONTROL_MASK; */
+    /* write_gpio_bank2(gpio_143, val); */
+    /* val = read_gpio_bank2(gpio_143); */ 
+    /* *flash++ = val; */
 
-    val = read_gpio_bank2(gpio_141); 
-    *flash++ = val;
-    val &= ~AMD_GPIO_CONTROL_MASK;
-    write_gpio_bank2(gpio_141, val);
-    val = read_gpio_bank2(gpio_141); 
-    *flash++ = val;
+    /* val = read_gpio_bank2(gpio_141); */ 
+    /* *flash++ = val; */
+    /* val &= ~AMD_GPIO_CONTROL_MASK; */
+    /* write_gpio_bank2(gpio_141, val); */
+    /* val = read_gpio_bank2(gpio_141); */ 
+    /* *flash++ = val; */
 
-    val = read_gpio_bank2(gpio_137); 
-    *flash++ = val;
-    val &= ~AMD_GPIO_CONTROL_MASK;
-    write_gpio_bank2(gpio_137, val);
-    val = read_gpio_bank2(gpio_137); 
-    *flash++ = val;
+    /* val = read_gpio_bank2(gpio_137); */ 
+    /* *flash++ = val; */
+    /* val &= ~AMD_GPIO_CONTROL_MASK; */
+    /* write_gpio_bank2(gpio_137, val); */
+    /* val = read_gpio_bank2(gpio_137); */ 
+    /* *flash++ = val; */
 
-    val = read_gpio_bank2(gpio_135); 
-    *flash++ = val;
-    val &= ~AMD_GPIO_CONTROL_MASK;
-    write_gpio_bank2(gpio_135, val);
-    val = read_gpio_bank2(gpio_135); 
-    *flash++ = val;
+    /* val = read_gpio_bank2(gpio_135); */ 
+    /* *flash++ = val; */
+    /* val &= ~AMD_GPIO_CONTROL_MASK; */
+    /* write_gpio_bank2(gpio_135, val); */
+    /* val = read_gpio_bank2(gpio_135); */ 
+    /* *flash++ = val; */
 
-    val = read_gpio_bank2(gpio_140); 
-    *flash++ = val;
-    val &= ~AMD_GPIO_CONTROL_MASK;
-    write_gpio_bank2(gpio_140, val);
-    val = read_gpio_bank2(gpio_140); 
-    *flash++ = val;
+    /* val = read_gpio_bank2(gpio_140); */ 
+    /* *flash++ = val; */
+    /* val &= ~AMD_GPIO_CONTROL_MASK; */
+    /* write_gpio_bank2(gpio_140, val); */
+    /* val = read_gpio_bank2(gpio_140); */ 
+    /* *flash++ = val; */
 
-    val = read_gpio_bank2(gpio_142); 
-    *flash++ = val;
-    val &= ~AMD_GPIO_CONTROL_MASK;
-    write_gpio_bank2(gpio_142, val);
-    val = read_gpio_bank2(gpio_142); 
-    *flash++ = val;
+    /* val = read_gpio_bank2(gpio_142); */ 
+    /* *flash++ = val; */
+    /* val &= ~AMD_GPIO_CONTROL_MASK; */
+    /* write_gpio_bank2(gpio_142, val); */
+    /* val = read_gpio_bank2(gpio_142); */ 
+    /* *flash++ = val; */
 
 }
 
 static void dump_pw()
 {
-    volatile uint32_t *flash = (uint32_t*)0x2000000;
+    /* volatile uint32_t *flash = (uint32_t*)0x2000000; */
     uint32_t* pvAddr;
-    *flash++ = 0x1;
+    /* *flash++ = 0x1; */
     int rc = pspSerialStubX86PhysMap(0xfed80300, true, (void**)&pvAddr);
     if (!rc)
     {
-        *flash++ = *pvAddr;
-        *flash++ = *(pvAddr + 1);
+        /* *flash++ = *pvAddr; */
+        /* *flash++ = *(pvAddr + 1); */
 
         *((uint8_t*)pvAddr + 59) = (uint8_t)0x1;
-        *flash++ = *((uint8_t*)pvAddr + 59);
+        /* *flash++ = *((uint8_t*)pvAddr + 59); */
         
     }
 
-    *flash++ = 0x2;
+    /* *flash++ = 0x2; */
 
 }
 
 static void test_uart()
 {
-    volatile uint32_t *flash = (uint32_t*)0x2000200;
+    /* volatile uint32_t *flash = (uint32_t*)0x2000200; */
     /* X86PADDR uart0 = 0xfedc9000; */
     /* X86PADDR uart1 = 0xfedca000; */
     /* X86PADDR uart2 = 0xfedce000; */
@@ -436,14 +436,14 @@ static void test_uart()
         int rc = pspSerialStubX86PhysMap(uarts[i], true, (void**)&pvUart);
         if (!rc)
         {
-            *flash++ = *pvUart;
-            *flash++ = *(pvUart + 1);
-            *flash++ = *(pvUart + 2);
-            *flash++ = *(pvUart + 3);
-            *flash++ = *(pvUart + 4);
-            *flash++ = *(pvUart + 5);
-            *flash++ = *(pvUart + 6);
-            *flash++ = *(pvUart + 7);
+            /* *flash++ = *pvUart; */
+            /* *flash++ = *(pvUart + 1); */
+            /* *flash++ = *(pvUart + 2); */
+            /* *flash++ = *(pvUart + 3); */
+            /* *flash++ = *(pvUart + 4); */
+            /* *flash++ = *(pvUart + 5); */
+            /* *flash++ = *(pvUart + 6); */
+            /* *flash++ = *(pvUart + 7); */
 
             /* *pvUart = 0x41414141; */
         
@@ -456,14 +456,14 @@ static void test_uart()
             /* *flash++ = *(pvUart + 6); */
             /* *flash++ = *(pvUart + 7); */
 
-            *flash++ = 0x1;
+            /* *flash++ = 0x1; */
             pspSerialStubX86PhysUnmapByPtr((void*)pvUart);
-            *flash++ = 0x2;
+            /* *flash++ = 0x2; */
 
 
         }
         
-        *flash++ = 0x3;
+        /* *flash++ = 0x3; */
 
     }
 
@@ -471,30 +471,30 @@ static void test_uart()
 
 static void enable_espi() {
 
-    volatile uint32_t* flash = (uint32_t*)0x2001100;
+    /* volatile uint32_t* flash = (uint32_t*)0x2001100; */
     X86PADDR pvEspiDevD3Ctl = 0xfed81e76;
     volatile uint8_t* pvAddr;
 
-    *flash++ = 0x1;
+    /* *flash++ = 0x1; */
 
     int rc =pspSerialStubX86PhysMap(pvEspiDevD3Ctl, true, (void**)&pvAddr);
     if (!rc)
     {
-        *flash++ = 0x2;
+        /* *flash++ = 0x2; */
         uint8_t ctl = *pvAddr;
         uint8_t state = *(pvAddr + 1);
-        *flash++ = 0x3;
-        *flash++ = ctl;
-        *flash++ = state;
+        /* *flash++ = 0x3; */
+        /* *flash++ = ctl; */
+        /* *flash++ = state; */
 
         ctl |= (1 << 3);
 
         *pvAddr = ctl;
-        *flash++ = *pvAddr;
+        /* *flash++ = *pvAddr; */
 
-        *flash++ = *(pvAddr + 1);
-        *flash++ = *(pvAddr + 1);
-        *flash++ = *(pvAddr + 1);
+        /* *flash++ = *(pvAddr + 1); */
+        /* *flash++ = *(pvAddr + 1); */
+        /* *flash++ = *(pvAddr + 1); */
 
         pspSerialStubX86PhysUnmapByPtr((void*)pvAddr);
 
@@ -510,26 +510,26 @@ static void enable_espi() {
 static void enable_io_uart_decode() {
     X86PADDR pvIoDecodeEn = 0xfffe000a3044;
     volatile uint32_t* pvAddr;
-    volatile uint32_t* flash = (uint32_t*)0x2001000;
+    /* volatile uint32_t* flash = (uint32_t*)0x2001000; */
 
-    *flash++ = 0x1;
+    /* *flash++ = 0x1; */
 
     int rc = pspSerialStubX86PhysMap(pvIoDecodeEn, true, (void**)&pvAddr);
     if (!rc)
     {
-        *flash++ = 0x2;
+        /* *flash++ = 0x2; */
         uint32_t val = *pvAddr;
-        *flash++ = val;
+        /* *flash++ = val; */
         val |= 0xc0;
         *pvAddr = val;
         val = *pvAddr;
-        *flash++ = val;
+        /* *flash++ = val; */
 
         pspSerialStubX86PhysUnmapByPtr((void*)pvAddr);
 
 
     }
-    *flash++ = 0x3;
+    /* *flash++ = 0x3; */
 
 }
 
@@ -538,23 +538,23 @@ static void set_pci_d14_f3_rsvd_func()
 
     X86PADDR pvPciDev14F3 = 0xfffe000a30d0;
     volatile uint32_t* pvAddr;
-    volatile uint32_t* flash = (uint32_t*)0x2001200;
+    /* volatile uint32_t* flash = (uint32_t*)0x2001200; */
 
-    *flash++ = 1;
+    /* *flash++ = 1; */
 
     int rc = pspSerialStubX86PhysMap(pvPciDev14F3, true, (void**)&pvAddr);
     if (!rc)
     {
-        *flash++ = 2;
+        /* *flash++ = 2; */
         uint32_t val = *pvAddr;
-        *flash++ = val;
+        /* *flash++ = val; */
         val = val & 0xfff9ffff | 0x40000;
         *pvAddr = val;
-        *flash++ = *pvAddr;
+        /* *flash++ = *pvAddr; */
 
         pspSerialStubX86PhysUnmapByPtr((void*)pvAddr);
     }
-    *flash++ = 3;
+    /* *flash++ = 3; */
 
 
 }
@@ -563,23 +563,23 @@ static void set_unknown_espi_reg()
 {
     X86PADDR pvEspiUnknown = 0xfec20040;
     volatile uint32_t* pvAddr;
-    volatile uint32_t* flash = (uint32_t*)0x2001300;
+    /* volatile uint32_t* flash = (uint32_t*)0x2001300; */
 
-    *flash++ = 1;
+    /* *flash++ = 1; */
 
     int rc = pspSerialStubX86PhysMap(pvEspiUnknown, true, (void**)&pvAddr);
     if (!rc)
     {
-        *flash++ = 2;
+        /* *flash++ = 2; */
         uint32_t val = *pvAddr;
-        *flash++ = val;
+        /* *flash++ = val; */
         val &= 0xfffffffb;
         *pvAddr = val;
-        *flash++ = *pvAddr;
+        /* *flash++ = *pvAddr; */
 
         pspSerialStubX86PhysUnmapByPtr((void*)pvAddr);
     }
-    *flash++ = 3;
+    /* *flash++ = 3; */
 
 }
 
@@ -630,9 +630,27 @@ static uint8_t aspeed_reg_read(volatile uint8_t *pbBase, uint8_t uReg)
     return *(pbBase + 1);
 }
 
+static void unknown_smn()
+{
+    volatile uint32_t *pvAddr;
+    LogRel("Enable unknown smn:\n");
+    
+    int rc =pspSerialStubSmnMap(0x2dc58d0,(void**)&pvAddr);
+    if (!rc)
+    {
+        uint32_t val = *pvAddr;
+        LogRel("Pre SMN 0x2dc58d0: %#x\n", val);
+        val = val & 0xfff9ffff | 0x40000;
+        *pvAddr = val;
+        LogRel("Post SMN 0x2dc58d0: %#x\n", *pvAddr);
+        pspSerialStubSmnUnmapByPtr( (void*)pvAddr);
+    }
+
+}
+
 static void configure_superio()
 {
-    X86PADDR pvEspiUnknown = 0xfffdfc00004e;
+    X86PADDR pvEspiUnknown = 0xfffdfc00002e;
     volatile uint8_t* pvAddr;
 
     int rc = pspSerialStubX86PhysMap(pvEspiUnknown, true, (void**)&pvAddr);
@@ -654,13 +672,14 @@ static void configure_superio()
         *pvAddr = 0xa5;
         for (unsigned i = 0x21; i < 0x30; i++)
             LogRel("Register %#x: %#x\n", i, aspeed_reg_read(pvAddr, i));
-        *(pvAddr + 1) = *(pvAddr+1) & ~0x0 | 0x80;
-        *pvAddr = 0xc;
-        *(pvAddr + 1) = *(pvAddr+1) & ~0x38 | 0x80;
-        *pvAddr = 0x25;
-        *(pvAddr + 1) = *(pvAddr+1) & ~0x1u | 0xfe;
-        *pvAddr = 0x28;
-        *(pvAddr + 1) = *(pvAddr+1) & ~0xf | 0x4;
+        *pvAddr = 0x7;
+        *(pvAddr + 1) = 0x2;
+        *pvAddr = 0x61;
+        *(pvAddr + 1) = 0xf8;
+        *pvAddr = 0x60;
+        *(pvAddr + 1) = 0x3;
+        *pvAddr = 0x30;
+        *(pvAddr + 1) = 0x1;
         *pvAddr = 0xaa;      
 #endif
         pspSerialStubX86PhysUnmapByPtr((void*)pvAddr);
@@ -722,13 +741,14 @@ static int pspStubUartTranspInit(void *pvMem, size_t cbMem, PPSPPDUTRANSP phPduT
     enable_io_uart_decode();
     map_superio_1640();
     enable_superio_port();
+    unknown_smn();
     configure_superio();
     /* dump_pw(); */
     /* read_gpio_state(); */
     /* configure_uart_gpio(); */
     /* test(); */
 
-    volatile uint32_t* flash = (uint32_t*)0x2000400;
+    /* volatile uint32_t* flash = (uint32_t*)0x2000400; */
     /* uint32_t val = 0; */
     /* volatile uint8_t* addr = 0; */
     /* int rc = pspSerialStubX86PhysMap(0xfedca000, true, (void**)&addr); */
@@ -738,35 +758,33 @@ static int pspStubUartTranspInit(void *pvMem, size_t cbMem, PPSPPDUTRANSP phPduT
     /*     pspSerialStubX86PhysUnmapByPtr((void*)addr); */
     /* } */
 
-    *(flash) = 0x1;
+    /* *(flash) = 0x1; */
 
     int rc = pspSerialStubX86PhysMap(pThis->PhysX86UartBase, true /*fMmio*/, (void **)&pThis->pvUart);
     if (!rc)
     {
-        *(flash) = 0x2;
+        /* *(flash) = 0x2; */
         rc = PSPUartCreate(&pThis->Uart, &pThis->IfIoDev);
         if (!rc)
         {
-            *(flash) = 0x3;
+            /* *(flash) = 0x3; */
             rc = PSPUartParamsSet(&pThis->Uart, 115200, PSPUARTDATABITS_8BITS, PSPUARTPARITY_NONE, PSPUARTSTOPBITS_1BIT);
             if (!rc) {
-                *(flash) = 0x4;
-                test_uart();
-                *(flash) = 0x5;
+                /* *(flash) = 0x4; */
+                /* test_uart(); */
+                /* *(flash) = 0x5; */
                 uint32_t val = 0x41;
                 size_t written = 0;
                 PSPUartWrite(&pThis->Uart, &val, 1, &written);
-                *(flash) = 0x6;
-                *(flash + 15) = written;
-            } else
-                *(flash + 16) = 0x1;
-        } else
-            *(flash + 16) = 0x2;
-    } else
-        *(flash + 16) = 0x3;
-
+                /* *(flash) = 0x6; */
+                /* *(flash + 15) = written; */
+            }
+        }
+    }
     return rc;
 }
+
+
 
 
 const PSPPDUTRANSPIF g_UartTransp =

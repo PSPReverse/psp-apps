@@ -1,0 +1,175 @@
+diff --git a/PspSerialStub/Makefile b/PspSerialStub/Makefile
+index 3eb1718..c536c01 100644
+--- a/PspSerialStub/Makefile
++++ b/PspSerialStub/Makefile
+@@ -1,5 +1,5 @@
+ CROSS_COMPILE=arm-none-eabi-
+-CFLAGS=-O0 -DIN_PSP -g -I../include -I../Lib/include -std=gnu99 -fomit-frame-pointer -nostartfiles -ffreestanding -Wextra -Werror -march=armv7ve
++CFLAGS=-O0 -DLOG_ENABLED -DIN_PSP -g -I../include -I../Lib/include -std=gnu99 -fomit-frame-pointer -nostartfiles -ffreestanding -Wextra -Werror -march=armv7ve
+ VPATH=../Lib/src
+ 
+ OBJS = main.o string.o log.o tm.o uart.o pdu-transp-uart.o pdu-transp-spi-flash.o
+diff --git a/PspSerialStub/main.c b/PspSerialStub/main.c
+index fc21795..090a7fd 100644
+--- a/PspSerialStub/main.c
++++ b/PspSerialStub/main.c
+@@ -34,7 +34,7 @@
+ #include "pdu-transp.h"
+ 
+ /** Use the SPI message channel instead of the UART. */
+-#define PSP_SERIAL_STUB_SPI_MSG_CHAN    1
++/* #define PSP_SERIAL_STUB_SPI_MSG_CHAN    0 */
+ 
+ /** Indefinite wait. */
+ #define PSP_SERIAL_STUB_INDEFINITE_WAIT 0xffffffff
+@@ -1580,6 +1580,8 @@ void main(void)
+     for (uint32_t i = 0; i < ELEMENTS(pThis->aX86MapSlots); i++)
+         pThis->aX86MapSlots[i].PhysX86AddrBase = NIL_X86PADDR;
+ 
++    uint32_t* test = (uint32_t*)0x2000000;
++
+     pspStubSmnMap(pThis, 0xa0000000 + PSP_SERIAL_STUB_EARLY_SPI_LOG_OFF, &pThis->pvEarlySpiLog);
+ 
+     /* Init the timer. */
+@@ -1596,8 +1598,10 @@ void main(void)
+     }
+ 
+     pspStubInitHw(pThis);
++    
+ 
+     LogRel("main: Hardware initialized\n");
++    /* *test = 0x4; */
+ 
+     /* Initialize the data transport mechanism selected. */
+     int rc = pspStubTranspInit(pThis);
+diff --git a/PspSerialStub/pdu-transp-uart.c b/PspSerialStub/pdu-transp-uart.c
+index dac624c..66aa83f 100644
+--- a/PspSerialStub/pdu-transp-uart.c
++++ b/PspSerialStub/pdu-transp-uart.c
+@@ -105,6 +105,7 @@ static size_t pspStubUartTranspPeek(PSPPDUTRANSP hPduTransp)
+ 
+ static int pspStubUartTranspEnd(PSPPDUTRANSP hPduTransp)
+ {
++    (void)hPduTransp;
+     /* Nothing to do. */
+     return INF_SUCCESS;
+ }
+@@ -112,6 +113,7 @@ static int pspStubUartTranspEnd(PSPPDUTRANSP hPduTransp)
+ 
+ static int pspStubUartTranspBegin(PSPPDUTRANSP hPduTransp)
+ {
++    (void)hPduTransp;
+     /* Nothing to do. */
+     return INF_SUCCESS;
+ }
+@@ -119,29 +121,108 @@ static int pspStubUartTranspBegin(PSPPDUTRANSP hPduTransp)
+ 
+ static void pspStubUartTranspTerm(PSPPDUTRANSP hPduTransp)
+ {
++    (void)hPduTransp;
+     /* Nothing to do. */
+ }
+ 
++#define ACPIMMIO_AOAC_BASE		0xfed81e00
++#define FCH_UART_LEGACY_DECODE		0xfedc0020
++#define   FCH_LEGACY_3F8_SH		3
++static void test() {
++    uint32_t* flash = (uint32_t*)0x2000000;
++    uint8_t* aoac = 0;
++
++    uint16_t* uart_leg_decode = 0;
++
++    uint8_t uart0_pwr_off = 22 + 0x40;
++    uint8_t uart0_ctl_off = 22 + 0x40 + 1;
++
++    uint32_t idx =0 ;
++    uint16_t uart_leg = (idx << 8) | (idx << 10) | (idx << 12) | (idx << 14);
++		uart_leg |= 1 << FCH_LEGACY_3F8_SH;
++
++    int rc = pspSerialStubX86PhysMap(FCH_UART_LEGACY_DECODE, true, (void**)&uart_leg_decode);
++    if (!rc)
++    {
++        *flash = *uart_leg_decode;
++        *uart_leg_decode = uart_leg;
++        *(flash+1) = *uart_leg_decode;
++
++        pspSerialStubX86PhysUnmapByPtr(uart_leg_decode);
++    }
++
++
++    /* rc = pspSerialStubX86PhysMap(ACPIMMIO_AOAC_BASE, true, (void**)&aoac); */
++    /* if (!rc) */
++    /* { */
++    /*     uint8_t val = *(aoac + uart0_ctl_off); */
++    /*     *(flash + 2) = val; */
++
++    /*     val = *(aoac + uart0_pwr_off); */
++    /*     val |= (1 << 3); */
++    /*     *(aoac + uart0_pwr_off) = val; */
++    /* } */
++    /* pspSerialStubDelayMs(100); */
++
++    /* uint8_t val = *(aoac + uart0_ctl_off); */
++    /* *(flash + 3) = val; */
++    /* pspSerialStubX86PhysUnmapByPtr(aoac); */
++    
++    /* 22 + 0x40 */
++
++
++
++
++}
++
+ 
+ static int pspStubUartTranspInit(void *pvMem, size_t cbMem, PPSPPDUTRANSP phPduTransp)
+ {
++    (void)phPduTransp;
+     if (cbMem < sizeof(PSPPDUTRANSPINT))
+         return ERR_INVALID_PARAMETER;
+ 
+     PPSPPDUTRANSPINT pThis = (PPSPPDUTRANSPINT)pvMem;
+ 
+     pThis->PhysX86UartBase     = 0xfffdfc0003f8;
++    /* pThis->PhysX86UartBase     = 0xfedc9000; */
+     pThis->pvUart              = NULL;
+     pThis->IfIoDev.pfnRegRead  = pspStubX86UartRegRead;
+     pThis->IfIoDev.pfnRegWrite = pspStubX86UartRegWrite;
+ 
+-    int rc = pspSerialStubX86PhysMap(pThis->PhysX86UartBase, true /*fMmio*/, (void **)&pThis->pvUart);
++    test();
++
++    volatile uint32_t* flash = (uint32_t*)0x2000000;
++    uint32_t val = 0;
++    volatile uint8_t* addr = 0;
++    int rc = pspSerialStubX86PhysMap(pThis->PhysX86UartBase, true, (void**)&addr);
++    if (!rc) 
++    {
++        *(flash + 4) = *(addr + 5);
++        *(addr) = 'A';
++        pspSerialStubX86PhysUnmapByPtr((void*)addr);
++    }
++    else
++    {
++        *(flash + 4) = 0xdeadbeef;
++    }
++
++
++    rc = pspSerialStubX86PhysMap(pThis->PhysX86UartBase, true /*fMmio*/, (void **)&pThis->pvUart);
+     if (!rc)
+     {
+         rc = PSPUartCreate(&pThis->Uart, &pThis->IfIoDev);
+         if (!rc)
++        {
+             rc = PSPUartParamsSet(&pThis->Uart, 115200, PSPUARTDATABITS_8BITS, PSPUARTPARITY_NONE, PSPUARTSTOPBITS_1BIT);
+-    }
++            uint8_t val = 'A';
++            size_t written = 0;
++            PSPUartWrite(&pThis->Uart, &val, 1, &written);
++            *(flash + 5) = written;
++        } else
++            *(flash + 9) = 0xdeadbeef;
++    } else
++        *(flash + 10) = 0xdeadbeef;
+ 
+     return rc;
+ }

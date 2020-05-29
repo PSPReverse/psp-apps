@@ -1,0 +1,961 @@
+diff --git a/DumpOnChipBlRemnants/_start.S b/DumpOnChipBlRemnants/_start.S
+index c84dd75..df3de50 100644
+--- a/DumpOnChipBlRemnants/_start.S
++++ b/DumpOnChipBlRemnants/_start.S
+@@ -1,8 +1,8 @@
+ .extern main
+ _start:
+-  ldr r0, =0x38500
+-  ldr r1, =0x40000
+-  ldr r2, =0x02aab000
++  ldr r0, =0x1b000
++  ldr r1, =0x1c000
++  ldr r2, =0x01aab000
+ 
+ _loop_head:
+   cmp r0, r1
+diff --git a/DumpOnChipBlRemnants/_start.o b/DumpOnChipBlRemnants/_start.o
+index 4141778..a8180bd 100644
+Binary files a/DumpOnChipBlRemnants/_start.o and b/DumpOnChipBlRemnants/_start.o differ
+diff --git a/DumpOnChipBlRemnants/dump-on-chip-bl-remnants.elf b/DumpOnChipBlRemnants/dump-on-chip-bl-remnants.elf
+index 3e9c30b..308c6bf 100755
+Binary files a/DumpOnChipBlRemnants/dump-on-chip-bl-remnants.elf and b/DumpOnChipBlRemnants/dump-on-chip-bl-remnants.elf differ
+diff --git a/DumpOnChipBlRemnants/dump-on-chip-bl-remnants.raw b/DumpOnChipBlRemnants/dump-on-chip-bl-remnants.raw
+index 37fc907..5c8f783 100755
+Binary files a/DumpOnChipBlRemnants/dump-on-chip-bl-remnants.raw and b/DumpOnChipBlRemnants/dump-on-chip-bl-remnants.raw differ
+diff --git a/InjectSvc6/Makefile b/InjectSvc6/Makefile
+index ea944c0..250c01b 100644
+--- a/InjectSvc6/Makefile
++++ b/InjectSvc6/Makefile
+@@ -16,7 +16,7 @@ clean:
+ 	$(CROSS_COMPILE)gcc $(CFLAGS) -c -o $@ $^
+ 
+ psp-svc-inject.h: psp-svc-inject.bin
+-	./bin2c $^ $@ psp_svc_inject
++	bin2c  $^ $@ psp_svc_inject
+ 
+ psp-svc-inject.bin: psp-svc-inject.elf
+ 	$(CROSS_COMPILE)objcopy -O binary $^ $@
+diff --git a/Lib/_start.S b/Lib/_start.S
+index 8860bcb..35c29ca 100644
+--- a/Lib/_start.S
++++ b/Lib/_start.S
+@@ -6,8 +6,8 @@ _start:
+   mov r6, r2
+   mov r7, r3
+   ldr sp, =SCRATCH_STACK_TOP
+-  mov r0, $0x3b000   /* Start address of main stack */
+-  mov r1, $0x3d000   /* End address of main stack */
++  mov r0, $0x4b000   /* Start address of main stack */
++  mov r1, $0x4d000   /* End address of main stack */
+   mov r2, sp         /* Address where to return the mapped memory area */
+   svc $1             /* Call map stack service call. */
+   ldr r0, [sp, #0x0] /* Load stack address from scratch stack. */
+diff --git a/Lib/include/svc.h b/Lib/include/svc.h
+index 4a898ac..5427f57 100644
+--- a/Lib/include/svc.h
++++ b/Lib/include/svc.h
+@@ -59,6 +59,12 @@ void * svc_smn_map_ex(uint32_t u32SmnAddr, uint32_t idCcxTgt);
+ 
+ uint32_t svc_smn_unmap(void *pvUnmap);
+ 
++void svc_unknown_id_16(void* pvArg0);
++
++void svc_unknown_id_4b(uint64_t* pvArg0);
++
++void svc_load_app(uint32_t idApp, void *pvDst, uint32_t *pvCbDst);
++
+ /** Own injected syscalls. */
+ 
+ void *svc_injected_map_x86_host_memory_ex(X86PADDR PhysX86AddrMap, uint32_t enmType, uint32_t fFlags);
+diff --git a/Lib/include/x86mem.h b/Lib/include/x86mem.h
+index ed4f0c0..e0d7280 100644
+--- a/Lib/include/x86mem.h
++++ b/Lib/include/x86mem.h
+@@ -23,6 +23,7 @@
+ #define ___x86mem_h
+ 
+ #include <types.h>
++#include <stddef.h>
+ 
+ /**
+  * Fallback method to copy memory from the x86 host using svc 0x26 to copy 4 bytes at a time.
+diff --git a/Lib/src/string.c b/Lib/src/string.c
+index d36f1ef..29ef46d 100644
+--- a/Lib/src/string.c
++++ b/Lib/src/string.c
+@@ -1,3 +1,4 @@
++#include <stddef.h>
+ #include <string.h>
+ 
+ size_t strlen(const char *pszStr)
+@@ -25,3 +26,23 @@ void memcpy(void *pvDst, const void *pvSrc, size_t cb)
+ 		*pbDst++ = *pbSrc++;
+ }
+ 
++int memcmp(const void *p1, const void *p2, size_t n)
++{
++    size_t i;
++
++    /**
++    * p1 and p2 are the same memory? easy peasy! bail out
++    */
++    if (p1 == p2)
++    {
++        return 0;
++    }
++
++    // This for loop does the comparing and pointer moving...
++    for (i = 0; (i < n) && (*(uint8_t *)p1 == *(uint8_t *)p2);
++        i++, p1 = 1 + (uint8_t *)p1, p2 = 1 + (uint8_t *)p2);
++        
++    //if i == length, then we have passed the test
++    return (i == n) ? 0 : (*(uint8_t *)p1 - *(uint8_t *)p2);
++}
++
+diff --git a/Lib/src/svc.S b/Lib/src/svc.S
+index c11c041..d8eba7e 100644
+--- a/Lib/src/svc.S
++++ b/Lib/src/svc.S
+@@ -100,6 +100,24 @@ svc_smn_unmap:
+     mov pc, lr
+ .type svc_smn_unmap, %function;
+ 
++.globl svc_unknown_id_16;
++svc_unknown_id_16:
++    svc #SVC_UNKNOWN_ID_16
++    mov pc, lr
++.type svc_unknown_id_16, %function
++
++.globl svc_unknown_id_4b;
++svc_unknown_id_4b:
++    svc #SVC_UNKNOWN_ID_4b
++    mov pc, lr
++.type svc_unknown_id_4b, %function
++
++.globl svc_load_app;
++svc_load_app:
++    svc #SVC_LOAD_APP
++    mov pc, lr
++.type svc_load_app, %function
++
+ /* void *svc_injected_map_x86_host_memory_ex(X86PADDR PhysX86AddrMap, uint32_t enmType, uint32_t fFlags) */
+ .globl svc_injected_map_x86_host_memory_ex;
+ svc_injected_map_x86_host_memory_ex:
+diff --git a/Lib/src/uart.c b/Lib/src/uart.c
+index f15b69b..06d5f37 100644
+--- a/Lib/src/uart.c
++++ b/Lib/src/uart.c
+@@ -35,29 +35,41 @@
+  */
+ static int pspUartDivisorSet(PPSPUART pUart, uint32_t uDivisor)
+ {
++    uint32_t* flash = (uint32_t*)0x2000800;
+     uint8_t uDivLatchL = uDivisor & 0xff;
+     uint8_t uDivLatchH = (uDivisor >> 8) & 0xff;
+ 
++    *flash++ = 0x1;
+     /* Read LCR and set DLAB. */
+     uint8_t uLcr = 0;
+     int rc = PSPIoDevRegRead(pUart->pIfDevIo, X86_UART_REG_LCR_OFF, &uLcr, sizeof(uLcr));
++    *flash++ = 0x2;
+     if (rc == INF_SUCCESS)
+     {
+         uLcr |= X86_UART_REG_LCR_DLAB;
++        *flash++ = 0x3;
+         rc = PSPIoDevRegWrite(pUart->pIfDevIo, X86_UART_REG_LCR_OFF, &uLcr, sizeof(uLcr));
++        *flash++ = 0x4;
+         if (rc == INF_SUCCESS)
+         {
++            *flash++ = 0x5;
+             rc = PSPIoDevRegWrite(pUart->pIfDevIo, X86_UART_REG_DL_LSB_OFF, &uDivLatchL, sizeof(uDivLatchL));
+-            if (rc == INF_SUCCESS)
++            *flash++ = 0x6;
++            if (rc == INF_SUCCESS) {
++                *flash++ = 0x7;
+                 rc = PSPIoDevRegWrite(pUart->pIfDevIo, X86_UART_REG_DL_MSB_OFF, &uDivLatchH, sizeof(uDivLatchH));
++            }
++            *flash++ = 0x8;
+ 
+             /* Clear DLAB again. */
+             uLcr &= ~X86_UART_REG_LCR_DLAB;
+             int rc2 = PSPIoDevRegWrite(pUart->pIfDevIo, X86_UART_REG_LCR_OFF, &uLcr, sizeof(uLcr));
++            *flash++ = 0x9;
+             if (rc == INF_SUCCESS)
+                 rc = rc2;
+         }
+     }
++    *flash++ = 0xa;
+ 
+     return rc;
+ }
+@@ -66,21 +78,28 @@ static int pspUartDivisorSet(PPSPUART pUart, uint32_t uDivisor)
+ int PSPUartCreate(PPSPUART pUart, PCPSPIODEVIF pIfDevIo)
+ {
+     pUart->pIfDevIo = pIfDevIo;
++    uint32_t* flash = (uint32_t*)0x2000600;
+ 
+     /* Bring the device into a known state. */
+ 
+     /* Disable all interrupts. */
+     uint8_t uTmp = 0;
++    *flash++ = 0x1;
+     int rc = PSPIoDevRegWrite(pIfDevIo, X86_UART_REG_IER_OFF, &uTmp, sizeof(uTmp));
++    *flash++ = 0x2;
+     if (rc == INF_SUCCESS)
+     {
++        *flash++ = 0x3;
+         /* Disable FIFO. */
+         rc = PSPIoDevRegWrite(pIfDevIo, X86_UART_REG_FCR_OFF, &uTmp, sizeof(uTmp));
++        *flash++ = 0x4;
+         if (rc == INF_SUCCESS)
+         {
++            *flash++ = 0x5;
+             /* Set known line parameters. */
+             rc = PSPUartParamsSet(pUart, 115200, PSPUARTDATABITS_8BITS,
+                                   PSPUARTPARITY_NONE, PSPUARTSTOPBITS_1BIT);
++            *flash++ = 0x6;
+         }
+     }
+ 
+@@ -97,13 +116,20 @@ void PSPUartDestroy(PPSPUART pUart)
+ int PSPUartParamsSet(PPSPUART pUart, uint32_t uBps, PSPUARTDATABITS enmDataBits,
+                      PSPUARTPARITY enmParity, PSPUARTSTOPBITS enmStopBits)
+ {
+-    uint32_t uDivisor = 115200 / uBps; /* For PC compatible UARTs using a 1.8432 MHz crystal. */
++    uint32_t* flash = (uint32_t*)0x2000700;
++    *flash++ = 0x1;
++    /* uint32_t uDivisor = 115200 / uBps; /1* For PC compatible UARTs using a 1.8432 MHz crystal. *1/ */
++    uint32_t uDivisor = 1;
+     uint8_t uLcr = 0;
+ 
++    *flash++ = 0x2;
++
+     switch (enmDataBits)
+     {
+         case PSPUARTDATABITS_8BITS:
++            *flash++ = 0x3;
+             X86_UART_REG_LCR_WLS_SET(uLcr, X86_UART_REG_LCR_WLS_8);
++            *flash++ = 0x4;
+             break;
+         default:
+             return ERR_INVALID_PARAMETER;
+@@ -127,9 +153,14 @@ int PSPUartParamsSet(PPSPUART pUart, uint32_t uBps, PSPUARTDATABITS enmDataBits,
+             return ERR_INVALID_PARAMETER;
+     }
+ 
++    *flash++ = 0x5;
+     int rc = PSPIoDevRegWrite(pUart->pIfDevIo, X86_UART_REG_LCR_OFF, &uLcr, sizeof(uLcr));
+-    if (!rc)
++    *flash++ = 0x6;
++    if (!rc) {
++        *flash++ = 0x7;
+         rc = pspUartDivisorSet(pUart, uDivisor);
++        *flash++ = 0x8;
++    }
+ 
+     return rc;
+ }
+diff --git a/PspSerialStub/Makefile b/PspSerialStub/Makefile
+index 3eb1718..c536c01 100644
+--- a/PspSerialStub/Makefile
++++ b/PspSerialStub/Makefile
+@@ -1,5 +1,5 @@
+ CROSS_COMPILE=arm-none-eabi-
+-CFLAGS=-O0 -DIN_PSP -g -I../include -I../Lib/include -std=gnu99 -fomit-frame-pointer -nostartfiles -ffreestanding -Wextra -Werror -march=armv7ve
++CFLAGS=-O0 -DLOG_ENABLED -DIN_PSP -g -I../include -I../Lib/include -std=gnu99 -fomit-frame-pointer -nostartfiles -ffreestanding -Wextra -Werror -march=armv7ve
+ VPATH=../Lib/src
+ 
+ OBJS = main.o string.o log.o tm.o uart.o pdu-transp-uart.o pdu-transp-spi-flash.o
+diff --git a/PspSerialStub/main.c b/PspSerialStub/main.c
+index fc21795..090a7fd 100644
+--- a/PspSerialStub/main.c
++++ b/PspSerialStub/main.c
+@@ -34,7 +34,7 @@
+ #include "pdu-transp.h"
+ 
+ /** Use the SPI message channel instead of the UART. */
+-#define PSP_SERIAL_STUB_SPI_MSG_CHAN    1
++/* #define PSP_SERIAL_STUB_SPI_MSG_CHAN    0 */
+ 
+ /** Indefinite wait. */
+ #define PSP_SERIAL_STUB_INDEFINITE_WAIT 0xffffffff
+@@ -1580,6 +1580,8 @@ void main(void)
+     for (uint32_t i = 0; i < ELEMENTS(pThis->aX86MapSlots); i++)
+         pThis->aX86MapSlots[i].PhysX86AddrBase = NIL_X86PADDR;
+ 
++    uint32_t* test = (uint32_t*)0x2000000;
++
+     pspStubSmnMap(pThis, 0xa0000000 + PSP_SERIAL_STUB_EARLY_SPI_LOG_OFF, &pThis->pvEarlySpiLog);
+ 
+     /* Init the timer. */
+@@ -1596,8 +1598,10 @@ void main(void)
+     }
+ 
+     pspStubInitHw(pThis);
++    
+ 
+     LogRel("main: Hardware initialized\n");
++    /* *test = 0x4; */
+ 
+     /* Initialize the data transport mechanism selected. */
+     int rc = pspStubTranspInit(pThis);
+diff --git a/PspSerialStub/pdu-transp-uart.c b/PspSerialStub/pdu-transp-uart.c
+index dac624c..0a6f334 100644
+--- a/PspSerialStub/pdu-transp-uart.c
++++ b/PspSerialStub/pdu-transp-uart.c
+@@ -69,12 +69,16 @@ static int pspStubX86UartRegRead(PCPSPIODEVIF pIfIoDev, uint32_t offReg, void *p
+  */
+ static int pspStubX86UartRegWrite(PCPSPIODEVIF pIfIoDev, uint32_t offReg, const void *pvBuf, size_t cbWrite)
+ {
++    volatile uint32_t* flash = (uint32_t*)0x2000500;
+     PPSPPDUTRANSPINT pThis = (PPSPPDUTRANSPINT)pIfIoDev;
+ 
+     /* UART supports only 1 byte wide register accesses. */
+     if (cbWrite != 1) return ERR_INVALID_STATE;
+ 
++    *flash++ = (uint32_t)pThis->pvUart + offReg;
++    *flash++ = *(uint8_t*)pvBuf;
+     *(volatile uint8_t *)((uintptr_t)pThis->pvUart + offReg) = *(uint8_t *)pvBuf;
++    *flash++ = *(volatile uint8_t *)((uintptr_t)pThis->pvUart + offReg);
+     return INF_SUCCESS;
+ }
+ 
+@@ -105,6 +109,7 @@ static size_t pspStubUartTranspPeek(PSPPDUTRANSP hPduTransp)
+ 
+ static int pspStubUartTranspEnd(PSPPDUTRANSP hPduTransp)
+ {
++    (void)hPduTransp;
+     /* Nothing to do. */
+     return INF_SUCCESS;
+ }
+@@ -112,6 +117,7 @@ static int pspStubUartTranspEnd(PSPPDUTRANSP hPduTransp)
+ 
+ static int pspStubUartTranspBegin(PSPPDUTRANSP hPduTransp)
+ {
++    (void)hPduTransp;
+     /* Nothing to do. */
+     return INF_SUCCESS;
+ }
+@@ -119,29 +125,601 @@ static int pspStubUartTranspBegin(PSPPDUTRANSP hPduTransp)
+ 
+ static void pspStubUartTranspTerm(PSPPDUTRANSP hPduTransp)
+ {
++    (void)hPduTransp;
+     /* Nothing to do. */
+ }
+ 
++#define ACPIMMIO_AOAC_BASE		0xfed81e00
++#define FCH_UART_LEGACY_DECODE		0xfedc0020
++#define   FCH_LEGACY_3F8_SH		3
++static void test() {
++    uint32_t* flash = (uint32_t*)0x2000000;
++    uint8_t* aoac = 0;
+ 
++    uint16_t* uart_leg_decode = 0;
++
++    uint8_t uart0_d3_ctl = 22 + 0x40;
++    uint8_t uart0_d3_state = 22 + 0x40 + 1;
++
++    uint32_t idx = 0 ;
++    uint16_t uart_leg = (idx << 8) | (idx << 10) | (idx << 12) | (idx << 14);
++		uart_leg |= 1 << FCH_LEGACY_3F8_SH;
++
++    int rc = pspSerialStubX86PhysMap(FCH_UART_LEGACY_DECODE, true, (void**)&uart_leg_decode);
++    if (!rc)
++    {
++        /* *flash = *uart_leg_decode; */
++        *uart_leg_decode = uart_leg;
++        /* *(flash+1) = *uart_leg_decode; */
++
++        pspSerialStubX86PhysUnmapByPtr(uart_leg_decode);
++    }
++
++
++    rc = pspSerialStubX86PhysMap(ACPIMMIO_AOAC_BASE, true, (void**)&aoac);
++    if (!rc)
++    {
++        *(flash + 50) = 0xD3;
++        uint8_t val = *(aoac + uart0_d3_state);
++        *(flash + 51) = val;
++
++        val = *(aoac + uart0_d3_ctl);
++        *(flash + 52) = val;
++        val |= (1 << 3);
++        *(aoac + uart0_d3_ctl) = val;
++    }
++    pspSerialStubDelayMs(100);
++
++    uint8_t val = *(aoac + uart0_d3_ctl);
++    *(flash + 53) = val;
++    val = *(aoac + uart0_d3_state);
++    *(flash + 54) = val;
++    pspSerialStubX86PhysUnmapByPtr(aoac);
++
++}
++
++#define AMD_GPIO_MUX_MASK			0x03
++#define GPIO_138_IOMUX_UART0_TXD 0
++#define GPIO_136_IOMUX_UART0_RXD 0
++#define ACPIMMIO_IOMUX_BASE		0xfed80d00
++#define ACPIMMIO_GPIO2_BASE		0xfed81700
++#define AMD_GPIO_CONTROL_MASK			0x00f4ff00
++#define GPIO_BANK2_CONTROL(gpio) (ACPIMMIO_GPIO2_BASE + (((gpio) - 128) * 4))
++#define GPIO_PULL_PULL_NONE 0
++static void configure_uart_gpio(void)
++{
++    uint32_t uart0_tx_func = 0;
++    uint32_t uart0_rx_func = 0;
++    uint32_t uart0_gpio_tx = 138;
++    uint32_t uart0_gpio_rx = 136;
++    volatile uint32_t* flash = (uint32_t*)0x2000000;
++    volatile uint8_t* addr;
++    X86PADDR gpio_addr;
++    uint32_t* gpio_reg;
++
++    int rc = pspSerialStubX86PhysMap(ACPIMMIO_IOMUX_BASE + uart0_gpio_rx, true, (void**)&addr);
++    if (!rc)
++    {
++		    /* iomux_write8(gpio, mux & AMD_GPIO_MUX_MASK); */
++        *addr = uart0_rx_func & AMD_GPIO_MUX_MASK;
++        *(flash + 42) = *addr;
++
++		    /* iomux_read8(gpio); /1* Flush posted write *1/ */
++        (void volatile)*addr;
++        pspSerialStubX86PhysUnmapByPtr((void*)addr);
++
++    } else
++        *(flash + 42) = 0xDEADBEEF;
++
++    gpio_addr = (X86PADDR)GPIO_BANK2_CONTROL(uart0_gpio_rx);
++
++    rc = pspSerialStubX86PhysMap(gpio_addr,true, (void**)&gpio_reg);
++    if (!rc)
++    {
++
++        volatile uint32_t reg;
++        reg = *gpio_reg;
++        reg &= ~AMD_GPIO_CONTROL_MASK;
++        reg |= GPIO_PULL_PULL_NONE;
++        *gpio_reg = reg;
++        *(flash + 43) = *gpio_reg;
++        pspSerialStubX86PhysUnmapByPtr((void*)gpio_reg);
++    } else
++        *(flash + 43) = 0xDEADBEEF;
++}
++
++static uint32_t read_gpio_bank2(uint32_t gpio)
++{
++    X86PADDR pvGpioBankReg = GPIO_BANK2_CONTROL(gpio);
++    volatile uint32_t* pvBankReg;
++    uint32_t pvVal = 0xDEADBEEF;
++    
++    int rc = pspSerialStubX86PhysMap(pvGpioBankReg, true, (void**)&pvBankReg);
++    if (!rc)
++    {
++        pvVal = *pvBankReg;
++        pspSerialStubX86PhysUnmapByPtr((void*)pvBankReg);
++    }
++
++    return pvVal;
++}
++
++static void write_gpio_bank2(uint32_t gpio, uint32_t val)
++{
++    X86PADDR pvGpioBankReg = GPIO_BANK2_CONTROL(gpio);
++    volatile uint32_t* pvBankReg;
++    
++    int rc = pspSerialStubX86PhysMap(pvGpioBankReg, true, (void**)&pvBankReg);
++    if (!rc)
++    {
++        *pvBankReg = val;
++        pspSerialStubX86PhysUnmapByPtr((void*)pvBankReg);
++    }
++}
++
++#define ACPIMMIO_IOMUX_BASE		0xfed80d00
++static uint8_t read_gpio_iomux(uint32_t gpio) {
++
++    X86PADDR pvGpioIomux = (ACPIMMIO_IOMUX_BASE + gpio);
++    volatile uint8_t* pvGpio;
++    uint8_t pvVal = 0;
++
++    int rc = pspSerialStubX86PhysMap(pvGpioIomux, true, (void**)&pvGpio);
++    if (!rc)
++    {
++        pvVal = *pvGpio;
++        pspSerialStubX86PhysUnmapByPtr((void*)pvGpio);
++    }
++
++    return pvVal;
++}
++
++static void write_gpio_iomux(uint32_t gpio, uint8_t val) {
++
++    X86PADDR pvGpioIomux = (ACPIMMIO_IOMUX_BASE + gpio);
++    volatile uint8_t* pvGpio;
++
++    int rc = pspSerialStubX86PhysMap(pvGpioIomux, true, (void**)&pvGpio);
++    if (!rc)
++    {
++        *pvGpio = val;
++        pspSerialStubX86PhysUnmapByPtr((void*)pvGpio);
++    }
++
++}
++
++
++void read_gpio_state() {
++    // UART 0
++    uint32_t gpio_138 = 138; // TX
++    uint32_t gpio_136 = 136; // RX
++    // UART 1
++    uint32_t gpio_143 = 143; // TX
++    uint32_t gpio_141 = 141; // RX
++    // UART 2
++    uint32_t gpio_137 = 137; // TX
++    uint32_t gpio_135 = 135; // RX
++    //UART 3
++    uint32_t gpio_140 = 140; // TX
++    uint32_t gpio_142 = 142; // RX
++
++    uint32_t val = 0;
++
++
++    volatile uint32_t* flash = (uint32_t*)0x2000100;
++    *flash++ = 0xDEADBEEF;
++
++    *flash++ = read_gpio_iomux(gpio_138);
++    *flash++ = read_gpio_iomux(gpio_136);
++    *flash++ = read_gpio_iomux(gpio_143);
++    *flash++ = read_gpio_iomux(gpio_141);
++    *flash++ = read_gpio_iomux(gpio_137);
++    *flash++ = read_gpio_iomux(gpio_135);
++    *flash++ = read_gpio_iomux(gpio_140);
++    *flash++ = read_gpio_iomux(gpio_142);
++
++    write_gpio_iomux(gpio_138,0); // UART 0 TX
++    write_gpio_iomux(gpio_136,0); // UART 0 RX
++    write_gpio_iomux(gpio_143,0); // UART 1 TX
++    write_gpio_iomux(gpio_141,0); // UART 1 RX
++    write_gpio_iomux(gpio_137,1); // UART 2 RX
++    write_gpio_iomux(gpio_135,1); // UART 2 TX
++    write_gpio_iomux(gpio_140,1); // UART 3 TX
++    write_gpio_iomux(gpio_142,1); // UART 3 RX
++
++    *flash++ = read_gpio_iomux(gpio_138);
++    *flash++ = read_gpio_iomux(gpio_136);
++    *flash++ = read_gpio_iomux(gpio_143);
++    *flash++ = read_gpio_iomux(gpio_141);
++    *flash++ = read_gpio_iomux(gpio_137);
++    *flash++ = read_gpio_iomux(gpio_135);
++    *flash++ = read_gpio_iomux(gpio_140);
++    *flash++ = read_gpio_iomux(gpio_142);
++
++    val = read_gpio_bank2(gpio_138); 
++    *flash++ = val;
++    val &= ~AMD_GPIO_CONTROL_MASK;
++    /* write_gpio_bank2(gpio_138, val); */
++    write_gpio_bank2(gpio_138, 0);
++    val = read_gpio_bank2(gpio_138); 
++    *flash++ = val;
++
++    val = read_gpio_bank2(gpio_136); 
++    *flash++ = val;
++    val &= ~AMD_GPIO_CONTROL_MASK;
++    /* write_gpio_bank2(gpio_136, val); */
++    write_gpio_bank2(gpio_136, 0);
++    val = read_gpio_bank2(gpio_136); 
++    *flash++ = val;
++
++    val = read_gpio_bank2(gpio_143); 
++    *flash++ = val;
++    val &= ~AMD_GPIO_CONTROL_MASK;
++    write_gpio_bank2(gpio_143, val);
++    val = read_gpio_bank2(gpio_143); 
++    *flash++ = val;
++
++    val = read_gpio_bank2(gpio_141); 
++    *flash++ = val;
++    val &= ~AMD_GPIO_CONTROL_MASK;
++    write_gpio_bank2(gpio_141, val);
++    val = read_gpio_bank2(gpio_141); 
++    *flash++ = val;
++
++    val = read_gpio_bank2(gpio_137); 
++    *flash++ = val;
++    val &= ~AMD_GPIO_CONTROL_MASK;
++    write_gpio_bank2(gpio_137, val);
++    val = read_gpio_bank2(gpio_137); 
++    *flash++ = val;
++
++    val = read_gpio_bank2(gpio_135); 
++    *flash++ = val;
++    val &= ~AMD_GPIO_CONTROL_MASK;
++    write_gpio_bank2(gpio_135, val);
++    val = read_gpio_bank2(gpio_135); 
++    *flash++ = val;
++
++    val = read_gpio_bank2(gpio_140); 
++    *flash++ = val;
++    val &= ~AMD_GPIO_CONTROL_MASK;
++    write_gpio_bank2(gpio_140, val);
++    val = read_gpio_bank2(gpio_140); 
++    *flash++ = val;
++
++    val = read_gpio_bank2(gpio_142); 
++    *flash++ = val;
++    val &= ~AMD_GPIO_CONTROL_MASK;
++    write_gpio_bank2(gpio_142, val);
++    val = read_gpio_bank2(gpio_142); 
++    *flash++ = val;
++
++}
++
++static void dump_pw()
++{
++    volatile uint32_t *flash = (uint32_t*)0x2000000;
++    uint32_t* pvAddr;
++    *flash++ = 0x1;
++    int rc = pspSerialStubX86PhysMap(0xfed80300, true, (void**)&pvAddr);
++    if (!rc)
++    {
++        *flash++ = *pvAddr;
++        *flash++ = *(pvAddr + 1);
++
++        *((uint8_t*)pvAddr + 59) = (uint8_t)0x1;
++        *flash++ = *((uint8_t*)pvAddr + 59);
++        
++    }
++
++    *flash++ = 0x2;
++
++}
++
++static void test_uart()
++{
++    volatile uint32_t *flash = (uint32_t*)0x2000200;
++    /* X86PADDR uart0 = 0xfedc9000; */
++    /* X86PADDR uart1 = 0xfedca000; */
++    /* X86PADDR uart2 = 0xfedce000; */
++    /* X86PADDR uart3 = 0xfedcf000; */
++    /* X86PADDR uartXX = 0xfedc3000; */
++    X86PADDR uartYY = 0xfffdfc0003f8;
++
++    /* X86PADDR uarts[5] = { uart0, uart1, uart2, uart3, uartXX}; */
++    X86PADDR uarts[1] = { uartYY};
++
++    int i;
++
++    for (i = 0; i < 1; i++) {
++        volatile uint8_t* pvUart;
++        int rc = pspSerialStubX86PhysMap(uarts[i], true, (void**)&pvUart);
++        if (!rc)
++        {
++            *flash++ = *pvUart;
++            *flash++ = *(pvUart + 1);
++            *flash++ = *(pvUart + 2);
++            *flash++ = *(pvUart + 3);
++            *flash++ = *(pvUart + 4);
++            *flash++ = *(pvUart + 5);
++            *flash++ = *(pvUart + 6);
++            *flash++ = *(pvUart + 7);
++
++            /* *pvUart = 0x41414141; */
++        
++            /* *flash++ = *pvUart; */
++            /* *flash++ = *(pvUart + 1); */
++            /* *flash++ = *(pvUart + 2); */
++            /* *flash++ = *(pvUart + 3); */
++            /* *flash++ = *(pvUart + 4); */
++            /* *flash++ = *(pvUart + 5); */
++            /* *flash++ = *(pvUart + 6); */
++            /* *flash++ = *(pvUart + 7); */
++
++            *flash++ = 0x1;
++            pspSerialStubX86PhysUnmapByPtr((void*)pvUart);
++            *flash++ = 0x2;
++
++
++        }
++        
++        *flash++ = 0x3;
++
++    }
++
++}
++
++static void enable_espi() {
++
++    volatile uint32_t* flash = (uint32_t*)0x2001100;
++    X86PADDR pvEspiDevD3Ctl = 0xfed81e76;
++    volatile uint8_t* pvAddr;
++
++    *flash++ = 0x1;
++
++    int rc =pspSerialStubX86PhysMap(pvEspiDevD3Ctl, true, (void**)&pvAddr);
++    if (!rc)
++    {
++        *flash++ = 0x2;
++        uint8_t ctl = *pvAddr;
++        uint8_t state = *(pvAddr + 1);
++        *flash++ = 0x3;
++        *flash++ = ctl;
++        *flash++ = state;
++
++        ctl |= (1 << 3);
++
++        *pvAddr = ctl;
++        *flash++ = *pvAddr;
++
++        *flash++ = *(pvAddr + 1);
++        *flash++ = *(pvAddr + 1);
++        *flash++ = *(pvAddr + 1);
++
++        pspSerialStubX86PhysUnmapByPtr((void*)pvAddr);
++
++    }
++
++}
++
++static void enable_io_uart_decode() {
++    X86PADDR pvIoDecodeEn = 0xfffe000a3044;
++    volatile uint32_t* pvAddr;
++    volatile uint32_t* flash = (uint32_t*)0x2001000;
++
++    *flash++ = 0x1;
++
++    int rc = pspSerialStubX86PhysMap(pvIoDecodeEn, true, (void**)&pvAddr);
++    if (!rc)
++    {
++        *flash++ = 0x2;
++        uint32_t val = *pvAddr;
++        *flash++ = val;
++        val |= 0xc0;
++        *pvAddr = val;
++        val = *pvAddr;
++        *flash++ = val;
++
++        pspSerialStubX86PhysUnmapByPtr((void*)pvAddr);
++
++
++    }
++    *flash++ = 0x3;
++
++}
++
++static void set_pci_d14_f3_rsvd_func() 
++{
++
++    X86PADDR pvPciDev14F3 = 0xfffe000a30d0;
++    volatile uint32_t* pvAddr;
++    volatile uint32_t* flash = (uint32_t*)0x2001200;
++
++    *flash++ = 1;
++
++    int rc = pspSerialStubX86PhysMap(pvPciDev14F3, true, (void**)&pvAddr);
++    if (!rc)
++    {
++        *flash++ = 2;
++        uint32_t val = *pvAddr;
++        *flash++ = val;
++        val = val & 0xfff9ffff | 0x40000;
++        *pvAddr = val;
++        *flash++ = *pvAddr;
++
++        pspSerialStubX86PhysUnmapByPtr((void*)pvAddr);
++    }
++    *flash++ = 3;
++
++
++}
++
++static void set_unknown_espi_reg()
++{
++    X86PADDR pvEspiUnknown = 0xfec20040;
++    volatile uint32_t* pvAddr;
++    volatile uint32_t* flash = (uint32_t*)0x2001300;
++
++    *flash++ = 1;
++
++    int rc = pspSerialStubX86PhysMap(pvEspiUnknown, true, (void**)&pvAddr);
++    if (!rc)
++    {
++        *flash++ = 2;
++        uint32_t val = *pvAddr;
++        *flash++ = val;
++        val &= 0xfffffffb;
++        *pvAddr = val;
++        *flash++ = *pvAddr;
++
++        pspSerialStubX86PhysUnmapByPtr((void*)pvAddr);
++    }
++    *flash++ = 3;
++
++}
++
++static void enable_superio_port()
++{
++    X86PADDR pvEspiUnknown = 0xfffe000a3048;
++    volatile uint32_t* pvAddr;
++    volatile uint32_t* flash = (uint32_t*)0x2001400;
++
++    *flash++ = 1;
++
++    int rc = pspSerialStubX86PhysMap(pvEspiUnknown, true, (void**)&pvAddr);
++    if (!rc)
++    {
++        *flash++ = 2;
++        uint32_t val = *pvAddr;
++        *flash++ = val;
++        val |= 0x7;
++        *pvAddr = val;
++        *flash++ = *pvAddr;
++
++        pspSerialStubX86PhysUnmapByPtr((void*)pvAddr);
++    }
++    *flash++ = 3;
++
++}
++
++static void map_superio_1640()
++{
++    X86PADDR pvEspiUnknown = 0xfffe000a3064;
++    volatile uint32_t* pvAddr;
++    volatile uint32_t* flash = (uint32_t*)0x2001500;
++
++    *flash++ = 1;
++
++    int rc = pspSerialStubX86PhysMap(pvEspiUnknown, true, (void**)&pvAddr);
++    if (!rc)
++    {
++        *flash++ = 2;
++        uint32_t val = *pvAddr;
++        *flash++ = val;
++        val = 0x1640;
++        *pvAddr = val;
++        *flash++ = *pvAddr;
++
++        pspSerialStubX86PhysUnmapByPtr((void*)pvAddr);
++    }
++    *flash++ = 3;
++
++}
++
++static void configure_superio()
++{
++    X86PADDR pvEspiUnknown = 0xfffdfc00164e;
++    volatile uint8_t* pvAddr;
++    volatile uint32_t* flash = (uint32_t*)0x2001600;
++
++    *flash++ = 1;
++
++    int rc = pspSerialStubX86PhysMap(pvEspiUnknown, true, (void**)&pvAddr);
++    if (!rc)
++    {
++        *pvAddr = 0x55;
++        *pvAddr = 0x2;
++        *(pvAddr + 1) = *(pvAddr+1) & ~0x0 | 0x80;
++        *pvAddr = 0xc;
++        *(pvAddr + 1) = *(pvAddr+1) & ~0x38 | 0x80;
++        *pvAddr = 0x25;
++        *(pvAddr + 1) = *(pvAddr+1) & ~0x1 | 0xfe;
++        *pvAddr = 0x28;
++        *(pvAddr + 1) = *(pvAddr+1) & ~0xf | 0x4;
++        *pvAddr = 0xaa;
++
++        pspSerialStubX86PhysUnmapByPtr((void*)pvAddr);
++    }
++    *flash++ = 3;
++
++}
+ static int pspStubUartTranspInit(void *pvMem, size_t cbMem, PPSPPDUTRANSP phPduTransp)
+ {
++    (void)phPduTransp;
++
+     if (cbMem < sizeof(PSPPDUTRANSPINT))
+         return ERR_INVALID_PARAMETER;
+ 
+     PPSPPDUTRANSPINT pThis = (PPSPPDUTRANSPINT)pvMem;
+ 
+     pThis->PhysX86UartBase     = 0xfffdfc0003f8;
++    /* pThis->PhysX86UartBase     = 0xfedc9000; */
++    /* pThis->PhysX86UartBase     = 0xfedca000; */
++    /* pThis->PhysX86UartBase     = 0xfedc3000; */
++    /* pThis->PhysX86UartBase     = 0xfedce000; */
++    /* pThis->PhysX86UartBase     = 0xfedcf000; */
+     pThis->pvUart              = NULL;
+     pThis->IfIoDev.pfnRegRead  = pspStubX86UartRegRead;
+     pThis->IfIoDev.pfnRegWrite = pspStubX86UartRegWrite;
+ 
++    set_pci_d14_f3_rsvd_func();
++    enable_espi();
++    set_unknown_espi_reg();
++    enable_io_uart_decode();
++    enable_superio_port();
++    map_superio_1640();
++    configure_superio();
++    /* dump_pw(); */
++    /* read_gpio_state(); */
++    /* configure_uart_gpio(); */
++    /* test(); */
++
++    volatile uint32_t* flash = (uint32_t*)0x2000400;
++    /* uint32_t val = 0; */
++    /* volatile uint8_t* addr = 0; */
++    /* int rc = pspSerialStubX86PhysMap(0xfedca000, true, (void**)&addr); */
++    /* if (!rc) */ 
++    /* { */
++    /*     *(addr) = 'A'; */
++    /*     pspSerialStubX86PhysUnmapByPtr((void*)addr); */
++    /* } */
++
++    *(flash) = 0x1;
++
+     int rc = pspSerialStubX86PhysMap(pThis->PhysX86UartBase, true /*fMmio*/, (void **)&pThis->pvUart);
+     if (!rc)
+     {
++        *(flash) = 0x2;
+         rc = PSPUartCreate(&pThis->Uart, &pThis->IfIoDev);
+         if (!rc)
++        {
++            *(flash) = 0x3;
+             rc = PSPUartParamsSet(&pThis->Uart, 115200, PSPUARTDATABITS_8BITS, PSPUARTPARITY_NONE, PSPUARTSTOPBITS_1BIT);
+-    }
++            if (!rc) {
++                *(flash) = 0x4;
++                test_uart();
++                *(flash) = 0x5;
++                uint32_t val = 0x41;
++                size_t written = 0;
++                PSPUartWrite(&pThis->Uart, &val, 1, &written);
++                *(flash) = 0x6;
++                *(flash + 15) = written;
++            } else
++                *(flash + 16) = 0x1;
++        } else
++            *(flash + 16) = 0x2;
++    } else
++        *(flash + 16) = 0x3;
+ 
+     return rc;
+ }
+diff --git a/build/linker.ld b/build/linker.ld
+index beea6fc..2d6b91d 100644
+--- a/build/linker.ld
++++ b/build/linker.ld
+@@ -1,7 +1,7 @@
+ 
+ SECTIONS
+ {
+-  . = 0x15100;
++  . = 0x1b100;
+   .text ALIGN(0x10): { *(.text) }
+   .data ALIGN(0x10) : { *(.data) }
+   .bss ALIGN(0x10) : { *(.bss) }
+diff --git a/include b/include
+--- a/include
++++ b/include
+@@ -1 +1 @@
+-Subproject commit 70ab8619baec0e505599b88c2e08f0cf5ed8eb15
++Subproject commit 70ab8619baec0e505599b88c2e08f0cf5ed8eb15-dirty

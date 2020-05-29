@@ -1553,6 +1553,7 @@ void ExcpFiq(void)
 }
 
 
+
 void main(void)
 {
     /* Init the stub state and create the UART driver instances. */

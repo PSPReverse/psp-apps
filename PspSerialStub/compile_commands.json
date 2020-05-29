@@ -1,0 +1,163 @@
+[
+    {
+        "arguments": [
+            "arm-none-eabi-gcc",
+            "-c",
+            "-O0",
+            "-DIN_PSP",
+            "-g",
+            "-I../include",
+            "-I../Lib/include",
+            "-std=gnu99",
+            "-fomit-frame-pointer",
+            "-nostartfiles",
+            "-ffreestanding",
+            "-Wextra",
+            "-Werror",
+            "-march=armv7ve",
+            "-o",
+            "uart.o",
+            "../Lib/src/uart.c"
+        ],
+        "directory": "/home/robert/Sec-T/Research/psp-reverse/psp-apps/PspSerialStub",
+        "file": "../Lib/src/uart.c"
+    },
+    {
+        "arguments": [
+            "arm-none-eabi-gcc",
+            "-c",
+            "-O0",
+            "-DIN_PSP",
+            "-g",
+            "-I../include",
+            "-I../Lib/include",
+            "-std=gnu99",
+            "-fomit-frame-pointer",
+            "-nostartfiles",
+            "-ffreestanding",
+            "-Wextra",
+            "-Werror",
+            "-march=armv7ve",
+            "-o",
+            "pdu-transp-uart.o",
+            "pdu-transp-uart.c"
+        ],
+        "directory": "/home/robert/Sec-T/Research/psp-reverse/psp-apps/PspSerialStub",
+        "file": "pdu-transp-uart.c"
+    },
+    {
+        "arguments": [
+            "arm-none-eabi-gcc",
+            "-c",
+            "-O0",
+            "-DIN_PSP",
+            "-g",
+            "-I../include",
+            "-I../Lib/include",
+            "-std=gnu99",
+            "-fomit-frame-pointer",
+            "-nostartfiles",
+            "-ffreestanding",
+            "-Wextra",
+            "-Werror",
+            "-march=armv7ve",
+            "-o",
+            "main.o",
+            "main.c"
+        ],
+        "directory": "/home/robert/Sec-T/Research/psp-reverse/psp-apps/PspSerialStub",
+        "file": "main.c"
+    },
+    {
+        "arguments": [
+            "arm-none-eabi-gcc",
+            "-c",
+            "-O0",
+            "-DIN_PSP",
+            "-g",
+            "-I../include",
+            "-I../Lib/include",
+            "-std=gnu99",
+            "-fomit-frame-pointer",
+            "-nostartfiles",
+            "-ffreestanding",
+            "-Wextra",
+            "-Werror",
+            "-march=armv7ve",
+            "-o",
+            "tm.o",
+            "../Lib/src/tm.c"
+        ],
+        "directory": "/home/robert/Sec-T/Research/psp-reverse/psp-apps/PspSerialStub",
+        "file": "../Lib/src/tm.c"
+    },
+    {
+        "arguments": [
+            "arm-none-eabi-gcc",
+            "-c",
+            "-O0",
+            "-DIN_PSP",
+            "-g",
+            "-I../include",
+            "-I../Lib/include",
+            "-std=gnu99",
+            "-fomit-frame-pointer",
+            "-nostartfiles",
+            "-ffreestanding",
+            "-Wextra",
+            "-Werror",
+            "-march=armv7ve",
+            "-o",
+            "pdu-transp-spi-flash.o",
+            "pdu-transp-spi-flash.c"
+        ],
+        "directory": "/home/robert/Sec-T/Research/psp-reverse/psp-apps/PspSerialStub",
+        "file": "pdu-transp-spi-flash.c"
+    },
+    {
+        "arguments": [
+            "arm-none-eabi-gcc",
+            "-c",
+            "-O0",
+            "-DIN_PSP",
+            "-g",
+            "-I../include",
+            "-I../Lib/include",
+            "-std=gnu99",
+            "-fomit-frame-pointer",
+            "-nostartfiles",
+            "-ffreestanding",
+            "-Wextra",
+            "-Werror",
+            "-march=armv7ve",
+            "-o",
+            "log.o",
+            "../Lib/src/log.c"
+        ],
+        "directory": "/home/robert/Sec-T/Research/psp-reverse/psp-apps/PspSerialStub",
+        "file": "../Lib/src/log.c"
+    },
+    {
+        "arguments": [
+            "arm-none-eabi-gcc",
+            "-c",
+            "-O0",
+            "-DIN_PSP",
+            "-g",
+            "-I../include",
+            "-I../Lib/include",
+            "-std=gnu99",
+            "-fomit-frame-pointer",
+            "-nostartfiles",
+            "-ffreestanding",
+            "-Wextra",
+            "-Werror",
+            "-march=armv7ve",
+            "-o",
+            "string.o",
+            "../Lib/src/string.c"
+        ],
+        "directory": "/home/robert/Sec-T/Research/psp-reverse/psp-apps/PspSerialStub",
+        "file": "../Lib/src/string.c"
+    }
+]
