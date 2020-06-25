@@ -37,6 +37,8 @@
 
 /** Use the SPI message channel instead of the UART. */
 #define PSP_SERIAL_STUB_SPI_MSG_CHAN    1
+/** Disables use of the hardware timers with the downside to not have accurate timekeeping. */
+/*#define PSP_STUB_NO_HW_TIMER            1*/
 
 /** Indefinite wait. */
 #define PSP_SERIAL_STUB_INDEFINITE_WAIT 0xffffffff
@@ -534,6 +536,7 @@ int pspSerialStubSmnMap(SMNADDR SmnAddr, void **ppv)
 static int pspStubTimerInit(PPSPTIMER pTimer)
 {
     int rc = TMInit(&pTimer->Tm);
+#ifndef PSP_STUB_NO_HW_TIMER
     if (!rc)
     {
         /* Initialize the timer. */
@@ -542,6 +545,7 @@ static int pspStubTimerInit(PPSPTIMER pTimer)
         *(volatile uint32_t *)(0x03010424 + 32) = 0;     /* Counter value. */
         *(volatile uint32_t *)(0x03010424)      = 0x101; /* This starts the timer. */
     }
+#endif
 
     return rc;
 }
@@ -555,6 +559,7 @@ static int pspStubTimerInit(PPSPTIMER pTimer)
  */
 static void pspStubTimerHandle(PPSPTIMER pTimer)
 {
+#ifndef PSP_STUB_NO_HW_TIMER
     uint32_t cCnts = *(volatile uint32_t *)(0x03010424 + 32);
     uint32_t cTicksPassed = 0;
 
@@ -586,6 +591,7 @@ static void pspStubTimerHandle(PPSPTIMER pTimer)
 
     pTimer->cSubUsTicks = cTicksPassed;
     pTimer->cCnts       = cCnts;
+#endif
 }
 
 
@@ -623,8 +629,13 @@ static inline uint64_t pspStubGetMicros(PPSPSTUBSTATE pThis)
  */
 static void pspStubDelayUs(PPSPSTUBSTATE pThis, uint64_t cMicros)
 {
+#ifndef PSP_STUB_NO_HW_TIMER
     uint64_t tsStart = pspStubGetMicros(pThis);
     while (pspStubGetMicros(pThis) <= tsStart + cMicros);
+#else
+    /* Spin a bit */
+    for (volatile uint32_t i = 0; i < 1000; i++);
+#endif
 }
 
 
@@ -668,8 +679,13 @@ static inline uint32_t pspStubGetMillies(PPSPSTUBSTATE pThis)
  */
 static void pspStubDelayMs(PPSPSTUBSTATE pThis, uint32_t cMillies)
 {
+#ifndef PSP_STUB_NO_HW_TIMER
     uint32_t tsStart = pspStubGetMillies(pThis);
     while (pspStubGetMillies(pThis) <= tsStart + cMillies);
+#else
+    /* Spin a bit */
+    for (volatile uint32_t i = 0; i < 10000; i++);
+#endif
 }
 
 
