@@ -26,6 +26,7 @@
 #include <log.h>
 #include <tm.h>
 
+#include <checkpoint.h>
 #include <io.h>
 #include <uart.h>
 
@@ -252,6 +253,8 @@ typedef const CMEXEC *PCCMEXEC;
 /** The global stub state. */
 static PSPSTUBSTATE g_StubState __attribute__ ((aligned (16)));
 static uint32_t off = 0;
+/** The checkpoint to catch and recover gracefully from aborts. */
+static PSPCHCKPT g_ChkPt;
 
 
 extern const PSPPDUTRANSPIF g_UartTransp;
@@ -1432,27 +1435,31 @@ static int pspStubPduProcessPspMemXfer(PPSPSTUBSTATE pThis, const void *pvPayloa
     size_t cbXfer = pReq->cbXfer;
     const void *pvRespPayload = NULL;
     size_t cbResPayload = 0;
-    if (fWrite)
-    {
-        enmResponse = PSPSERIALPDURRNID_RESPONSE_PSP_MEM_WRITE;
-        void *pvDst = (void *)(uintptr_t)pReq->PspAddrStart;
-        const void *pvSrc = (pReq + 1);
-        memcpy(pvDst, pvSrc, cbXfer);
 
-        /* Invalidate and clean memory. */
-        while (cbXfer)
-        {
-            asm volatile("mcr p15, 0x0, %0, cr7, cr14, 0x1\n": : "r" (pvDst) :"memory");
-            pvDst = (uint8_t *)pvDst + 32;
-            cbXfer -= MIN(cbXfer, 32);
-        }
-    }
-    else
+    if (PSPCheckPointSet(&g_ChkPt))
     {
-        enmResponse   = PSPSERIALPDURRNID_RESPONSE_PSP_MEM_READ;
-        pvRespPayload = (void *)(uintptr_t)pReq->PspAddrStart;
-        cbResPayload  = cbXfer;
-        /** @todo Need to copy into temporary buffer for proper exception handling. */
+        if (fWrite)
+        {
+            enmResponse = PSPSERIALPDURRNID_RESPONSE_PSP_MEM_WRITE;
+            void *pvDst = (void *)(uintptr_t)pReq->PspAddrStart;
+            const void *pvSrc = (pReq + 1);
+            memcpy(pvDst, pvSrc, cbXfer);
+
+            /* Invalidate and clean memory. */
+            while (cbXfer)
+            {
+                asm volatile("mcr p15, 0x0, %0, cr7, cr14, 0x1\n": : "r" (pvDst) :"memory");
+                pvDst = (uint8_t *)pvDst + 32;
+                cbXfer -= MIN(cbXfer, 32);
+            }
+        }
+        else
+        {
+            enmResponse   = PSPSERIALPDURRNID_RESPONSE_PSP_MEM_READ;
+            pvRespPayload = (void *)(uintptr_t)pReq->PspAddrStart;
+            cbResPayload  = cbXfer;
+            /** @todo Need to copy into temporary buffer for proper exception handling. */
+        }
     }
 
     PSPSTS rcReq = STS_INF_SUCCESS;
@@ -1519,21 +1526,25 @@ static int pspStubPduProcessPspMmioXfer(PPSPSTUBSTATE pThis, const void *pvPaylo
     size_t cbResPayload = 0;
     const void *pvSrc = NULL;
     void *pvDst = NULL;
-    if (fWrite)
+
+    if (PSPCheckPointSet(&g_ChkPt))
     {
-        enmResponse = PSPSERIALPDURRNID_RESPONSE_PSP_MMIO_WRITE;
-        pvDst = (void *)(uintptr_t)pReq->PspAddrStart;
-        pvSrc = (pReq + 1);
-        pspStubMmioAccess(pvDst, (pReq + 1), cbXfer);
-    }
-    else
-    {
-        enmResponse   = PSPSERIALPDURRNID_RESPONSE_PSP_MMIO_READ;
-        pvSrc = (void *)(uintptr_t)pReq->PspAddrStart;
-        pvDst = &abRead[0];
-        pspStubMmioAccess(&abRead[0], pvSrc, cbXfer);
-        pvRespPayload = &abRead[0];
-        cbResPayload  = cbXfer;
+        if (fWrite)
+        {
+            enmResponse = PSPSERIALPDURRNID_RESPONSE_PSP_MMIO_WRITE;
+            pvDst = (void *)(uintptr_t)pReq->PspAddrStart;
+            pvSrc = (pReq + 1);
+            pspStubMmioAccess(pvDst, (pReq + 1), cbXfer);
+        }
+        else
+        {
+            enmResponse   = PSPSERIALPDURRNID_RESPONSE_PSP_MMIO_READ;
+            pvSrc = (void *)(uintptr_t)pReq->PspAddrStart;
+            pvDst = &abRead[0];
+            pspStubMmioAccess(&abRead[0], pvSrc, cbXfer);
+            pvRespPayload = &abRead[0];
+            cbResPayload  = cbXfer;
+        }
     }
 
     PSPSTS rcReq = STS_INF_SUCCESS;
@@ -1569,31 +1580,34 @@ static int pspStubPduProcessPspSmnXfer(PPSPSTUBSTATE pThis, const void *pvPayloa
         uint8_t abRead[8];
         size_t cbRespPayload = 0;
 
-        if (   pReq->cbXfer == 1
-            || pReq->cbXfer == 2
-            || pReq->cbXfer == 4)
+        if (PSPCheckPointSet(&g_ChkPt))
         {
-            if (fWrite)
-                pspStubMmioAccess(pvMap, (pReq + 1), pReq->cbXfer);
-            else
+            if (   pReq->cbXfer == 1
+                || pReq->cbXfer == 2
+                || pReq->cbXfer == 4)
             {
-                pspStubMmioAccess(&abRead[0], pvMap, pReq->cbXfer);
-                pvRespPayload = &abRead[0];
-                cbRespPayload = pReq->cbXfer;
-            }
-        }
-        else
-        {
-            if (fWrite)
-            {
-                const void *pvSrc = (pReq + 1);
-                memcpy(pvMap, pvSrc, pReq->cbXfer);
+                if (fWrite)
+                    pspStubMmioAccess(pvMap, (pReq + 1), pReq->cbXfer);
+                else
+                {
+                    pspStubMmioAccess(&abRead[0], pvMap, pReq->cbXfer);
+                    pvRespPayload = &abRead[0];
+                    cbRespPayload = pReq->cbXfer;
+                }
             }
             else
             {
-                memcpy(&pThis->abPduResp[0], pvMap, pReq->cbXfer);
-                pvRespPayload = &pThis->abPduResp[0];
-                cbRespPayload = pReq->cbXfer;
+                if (fWrite)
+                {
+                    const void *pvSrc = (pReq + 1);
+                    memcpy(pvMap, pvSrc, pReq->cbXfer);
+                }
+                else
+                {
+                    memcpy(&pThis->abPduResp[0], pvMap, pReq->cbXfer);
+                    pvRespPayload = &pThis->abPduResp[0];
+                    cbRespPayload = pReq->cbXfer;
+                }
             }
         }
 
@@ -1636,16 +1650,20 @@ static int pspStubPduProcessPspX86MemXfer(PPSPSTUBSTATE pThis, const void *pvPay
         size_t cbXfer = pReq->cbXfer;
         const void *pvRespPayload = NULL;
         size_t cbRespPayload = 0;
-        if (fWrite)
+
+        if (PSPCheckPointSet(&g_ChkPt))
         {
-            const void *pvSrc = (pReq + 1);
-            memcpy(pvMap, pvSrc, cbXfer);
-        }
-        else
-        {
-            pvRespPayload = pvMap;
-            cbRespPayload = cbXfer;
-            /** @todo Need to copy into temporary buffer for proper exception handling. */
+            if (fWrite)
+            {
+                const void *pvSrc = (pReq + 1);
+                memcpy(pvMap, pvSrc, cbXfer);
+            }
+            else
+            {
+                pvRespPayload = pvMap;
+                cbRespPayload = cbXfer;
+                /** @todo Need to copy into temporary buffer for proper exception handling. */
+            }
         }
 
         PSPSTS rcReq = STS_INF_SUCCESS;
@@ -1692,13 +1710,17 @@ static int pspStubPduProcessPspX86MmioXfer(PPSPSTUBSTATE pThis, const void *pvPa
         size_t cbRespPayload = 0;
         const void *pvSrc = NULL;
         void *pvDst = NULL;
-        if (fWrite)
-            pspStubMmioAccess(pvMap, (pReq + 1), pReq->cbXfer);
-        else
+
+        if (PSPCheckPointSet(&g_ChkPt))
         {
-            pspStubMmioAccess(&abRead[0], pvMap, pReq->cbXfer);
-            pvRespPayload = &abRead[0];
-            cbRespPayload = pReq->cbXfer;
+            if (fWrite)
+                pspStubMmioAccess(pvMap, (pReq + 1), pReq->cbXfer);
+            else
+            {
+                pspStubMmioAccess(&abRead[0], pvMap, pReq->cbXfer);
+                pvRespPayload = &abRead[0];
+                cbRespPayload = pReq->cbXfer;
+            }
         }
 
         pspStubX86PhysUnmapByPtr(pThis, pvMap);
@@ -1751,7 +1773,9 @@ static int pspStubPduProcessCoProcRw(PPSPSTUBSTATE pThis, const void *pvPayload,
                     | (pReq->u8Crm & 0xf);
         asm volatile("mcr p15, 0x0, %0, cr7, cr5, 0x1\n": : "r" (pu32Insn) :"memory");
         asm volatile("dsb #0xf\nisb #0xf\n": : :"memory");
-        pspSerialStubCoProcWriteAsm(uVal);
+
+        if (PSPCheckPointSet(&g_ChkPt))
+            pspSerialStubCoProcWriteAsm(uVal);
     }
     else
     {
@@ -1771,7 +1795,8 @@ static int pspStubPduProcessCoProcRw(PPSPSTUBSTATE pThis, const void *pvPayload,
                     | (pReq->u8Crm & 0xf);
         asm volatile("mcr p15, 0x0, %0, cr7, cr5, 0x1\n": : "r" (pu32Insn) :"memory");
         asm volatile("dsb #0xf\nisb #0xf\n": : :"memory");
-        uValRead = pspSerialStubCoProcReadAsm();
+        if (PSPCheckPointSet(&g_ChkPt))
+            uValRead = pspSerialStubCoProcReadAsm();
     }
 
     PSPSTS rcReq = STS_INF_SUCCESS;
@@ -1959,17 +1984,20 @@ static int pspStubPduProcessDataXfer(PPSPSTUBSTATE pThis, const void *pvPayload,
         void *pvRespPayload = NULL;
         size_t cbRespPayload = 0;
 
-        if (pReq->fFlags & PSP_SERIAL_DATA_XFER_F_MEMSET)
-            pspStubPduDataXferMemset(pThis, pReq, pvMap);
-        else if (pReq->fFlags & PSP_SERIAL_DATA_XFER_F_READ)
+        if (PSPCheckPointSet(&g_ChkPt))
         {
-            pvRespPayload = &pThis->abPduResp[0];
-            cbRespPayload  = pReq->cbXfer;
+            if (pReq->fFlags & PSP_SERIAL_DATA_XFER_F_MEMSET)
+                pspStubPduDataXferMemset(pThis, pReq, pvMap);
+            else if (pReq->fFlags & PSP_SERIAL_DATA_XFER_F_READ)
+            {
+                pvRespPayload = &pThis->abPduResp[0];
+                cbRespPayload  = pReq->cbXfer;
 
-            pspStubPduDataXferRead(pThis, pReq, pvMap, pvRespPayload);
+                pspStubPduDataXferRead(pThis, pReq, pvMap, pvRespPayload);
+            }
+            else if (pReq->fFlags & PSP_SERIAL_DATA_XFER_F_WRITE)
+                pspStubPduDataXferWrite(pThis, pReq, pvMap, (void *)(pReq + 1));
         }
-        else if (pReq->fFlags & PSP_SERIAL_DATA_XFER_F_WRITE)
-            pspStubPduDataXferWrite(pThis, pReq, pvMap, (void *)(pReq + 1));
 
         pspStubPduDataXferAddressUnmapByPtr(pThis, pReq, pvMap);
 
@@ -2099,7 +2127,7 @@ static int pspStubPduProcessExecCodeMod(PPSPSTUBSTATE pThis, const void *pvPaylo
             PFNCMENTRY pfnEntry = (PFNCMENTRY)CM_FLAT_BINARY_LOAD_ADDR;
             uint32_t u32CmRet = pfnEntry(&CmExec.CmIf, u32Arg0, u32Arg1, u32Arg2, u32Arg3);
 
-            /* The code moudle finished, send the notification. */
+            /* The code module finished, send the notification. */
             PSPSERIALEXECCMFINISHEDNOT ExecFinishedNot;
             ExecFinishedNot.u32CmRet = u32CmRet;
             ExecFinishedNot.u32Pad0  = 0;
@@ -2699,12 +2727,27 @@ static void pspStubLogFlush(void *pvUser, uint8_t *pbBuf, size_t cbBuf)
 }
 
 
+/**
+ * Resumes the given checkpoitn after the exception handler returned.
+ *
+ * @returns nothing.
+ * @param   pRegFrame               The register frame to update.
+ * @param   pChkPt                  The checkpoint to resume.
+ */
+static void pspStubChkPtResume(PPSPIRQREGFRAME pRegFrame, PCPSPCHCKPT pChkPt)
+{
+    pRegFrame->aGprs[0] = pChkPt->Regs.u32R0; /* Let it point to the checkpoint state. */
+    pRegFrame->uRegLr   = pChkPt->Regs.u32PC & ~1; /* Continue from the checkpoint. */
+    pRegFrame->uRegSpsr = pChkPt->Regs.u32Cpsr;
+}
+
+
 void ExcpUndefInsn(PPSPIRQREGFRAME pRegFrame)
 {
     PPSPSTUBSTATE pThis = &g_StubState;
 
     pspStubExcpSetCheckNonePending(pThis, PSPSTUBEXCP_UNDEF_INSN);
-    /* Continue with instruction after the one causing the undefined exception. */
+    pspStubChkPtResume(pRegFrame, &g_ChkPt);
 }
 
 
@@ -2720,7 +2763,7 @@ void ExcpPrefAbrt(PPSPIRQREGFRAME pRegFrame)
     PPSPSTUBSTATE pThis = &g_StubState;
 
     pspStubExcpSetCheckNonePending(pThis, PSPSTUBEXCP_PREFETCH_ABRT);
-    pRegFrame->uRegLr -= 4; /* Continue with instruction after the one causing the prefetch abort. */
+    pspStubChkPtResume(pRegFrame, &g_ChkPt);
 }
 
 
@@ -2728,12 +2771,12 @@ void ExcpDataAbrt(PPSPIRQREGFRAME pRegFrame)
 {
     PPSPSTUBSTATE pThis = &g_StubState;
 
-    LogRel("ExcpDataAbrt: pc=%#x cpsr=%#x r0=%#x r1=%#x r2=%#x r3=%#x r4=%#x r5=%#xr6=%#x r7=%#x\n",
+    LogRel("ExcpDataAbrt: pc=%#x cpsr=%#x r0=%#x r1=%#x r2=%#x r3=%#x r4=%#x r5=%#x r6=%#x r7=%#x\n",
            pRegFrame->uRegLr -= 8, pRegFrame->uRegSpsr, pRegFrame->aGprs[0], pRegFrame->aGprs[1], pRegFrame->aGprs[2],
            pRegFrame->aGprs[3], pRegFrame->aGprs[4], pRegFrame->aGprs[5], pRegFrame->aGprs[6], pRegFrame->aGprs[7]);
 
     pspStubExcpSetCheckNonePending(pThis, PSPSTUBEXCP_DATA_ABRT);
-    pRegFrame->uRegLr -= 4; /* Continue with instruction after the one causing the data abort. */
+    pspStubChkPtResume(pRegFrame, &g_ChkPt);
 }
 
 
