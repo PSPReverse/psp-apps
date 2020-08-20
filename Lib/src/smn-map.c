@@ -51,7 +51,7 @@ static PSPSMNMAPPING               aSmnMapSlots[32];
  * @param   SmnAddr                 The SMN address to map.
  * @param   ppv                     Where to store the pointer to the mapping on success.
  */
-static int pspSmnMap(SMNADDR SmnAddr, void **ppv)
+int pspSmnMap(SMNADDR SmnAddr, void **ppv)
 {
     int rc = INF_SUCCESS;
 
@@ -108,7 +108,7 @@ static int pspSmnMap(SMNADDR SmnAddr, void **ppv)
  * @param   pThis                   The serial stub instance data.
  * @param   pv                      Pointer to the mapping as returned by a successful call to pspStubSmnMap().
  */
-static int pspSmnUnmapByPtr(void *pv)
+int pspSmnUnmapByPtr(void *pv)
 {
     int rc = INF_SUCCESS;
     uintptr_t PspAddrMapBase = ((uintptr_t)pv) & ~(_1M - 1);

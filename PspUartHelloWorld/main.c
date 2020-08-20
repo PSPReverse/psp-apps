@@ -40,7 +40,7 @@ static void pspSerialSuperIoInit(void)
     pspX86MmioWriteU32(0xfffe000a3044, 0xc0);
     pspX86MmioWriteU32(0xfffe000a3048, 0x20ff07);
     pspX86MmioWriteU32(0xfffe000a3064, 0x1640);
-#if 0
+#if 1
     pspX86MmioWriteU8(0xfffdfc00002e, 0x87);
     pspX86MmioWriteU8(0xfffdfc00002e, 0x01);
     pspX86MmioWriteU8(0xfffdfc00002e, 0x55);
@@ -82,6 +82,36 @@ static void pspSerialSuperIoInit(void)
     pspX86MmioWriteU8(0xfffdfc00002f, 0x1);
     pspX86MmioWriteU8(0xfffdfc00002e, 0xaa);
 #endif
+}
+
+
+/**
+ * Does a MMIO read/write of the given length.
+ *
+ * @returns nothing.
+ * @param   pvDst               The destination.
+ * @param   pvSrc               The source.
+ * @param   cb                  Number of bytes to access.
+ */
+static void pspStubMmioAccess(void *pvDst, const void *pvSrc, size_t cb)
+{
+    switch (cb)
+    {
+        case 1:
+            *(volatile uint8_t *)pvDst = *(volatile const uint8_t *)pvSrc;
+            break;
+        case 2:
+            *(volatile uint16_t *)pvDst = *(volatile const uint16_t *)pvSrc;
+            break;
+        case 4:
+            *(volatile uint32_t *)pvDst = *(volatile const uint32_t *)pvSrc;
+            break;
+        case 8:
+            *(volatile uint64_t *)pvDst = *(volatile const uint64_t *)pvSrc;
+            break;
+        default:
+            break;
+    }
 }
 
 /**
@@ -147,31 +177,49 @@ void ExcpFiq(void) {
   do {} while(1);
 }
 
-int main(void) {
+static uint32_t pspStubGetPhysDieId(void)
+{
+    void *pvMap = NULL;
+    int rc = pspSmnMap(0x5a078, &pvMap);
+    if (!rc)
+    {
+        uint32_t uVal;
+        pspStubMmioAccess(&uVal, (void *)pvMap, sizeof(uint32_t));
+        pspSmnUnmapByPtr(pvMap);
+        return uVal & 0x3;
+    }
 
+    return 0xffffffff;
+}
+
+int main(void)
+{
     asm volatile("dsb #0xf\n"
                  "isb #0xf\n"
                  "cpsid if\n": : :"memory");
-  char a = 'A';
-  PSPUART uart;
-  PSPPDUTRANSPINT ptrans;
-  ptrans.IfIoDev.pfnRegWrite = pspUartRegWrite;
-  ptrans.IfIoDev.pfnRegRead = pspUartRegRead;
-  ptrans.pvUart = NULL;
-  pspX86MapInit();
-  pspSmnMapInit();
+    char a = 'A';
+    PSPUART uart;
+    PSPPDUTRANSPINT ptrans;
+    ptrans.IfIoDev.pfnRegWrite = pspUartRegWrite;
+    ptrans.IfIoDev.pfnRegRead = pspUartRegRead;
+    ptrans.pvUart = NULL;
+    pspX86MapInit();
+    pspSmnMapInit();
 
-  /* pspSerialSuperIoInit(); */
-  pspX86PhysMap(0xfffdfc000080, true, (void**)&(ptrans.pvUart));
-  *(uint8_t*)ptrans.pvUart = 0x1;
+    /* Don't do anything if this is not the master PSP. */
+    /* @todo Figure out why this is required to get the UART working. */
+    if (pspStubGetPhysDieId() != 0)
+    {
+        for (;;);
+    }
 
+    pspSerialSuperIoInit();
 
-  /* int rc; */
+    pspX86PhysMap(0xfffdfc0003f8, true, (void**)&ptrans.pvUart);
 
-  PSPUartCreate(&uart, &(ptrans.IfIoDev));
-  PSPUartParamsSet(&uart, 115200, PSPUARTDATABITS_8BITS, PSPUARTPARITY_NONE, PSPUARTSTOPBITS_1BIT);
+    PSPUartCreate(&uart, &(ptrans.IfIoDev));
+    PSPUartParamsSet(&uart, 115200, PSPUARTDATABITS_8BITS, PSPUARTPARITY_NONE, PSPUARTSTOPBITS_1BIT);
 
-  PSPUartWrite(&uart, "Hello World\n", sizeof("Hello World\n"), NULL);
-
-  return 0;
+    PSPUartWrite(&uart, "Hello World\n", sizeof("Hello World\n"), NULL);
+    for(;;);
 }
