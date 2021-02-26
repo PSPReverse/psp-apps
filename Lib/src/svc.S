@@ -112,6 +112,11 @@ svc_unknown_id_4b:
     mov pc, lr
 .type svc_unknown_id_4b, %function
 
+.globl svc_load_app;
+svc_load_app:
+    svc #SVC_FFS_ENTRY_READ
+    mov pc, lr
+.type svc_load_app, %function
 
 /* void *svc_injected_map_x86_host_memory_ex(X86PADDR PhysX86AddrMap, uint32_t enmType, uint32_t fFlags) */
 .globl svc_injected_map_x86_host_memory_ex;
